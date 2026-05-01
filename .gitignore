@@ -1,0 +1,63 @@
+# =============================
+# Secrets
+# =============================
+.env
+.env.local
+.env.production
+.env.*.local
+
+# =============================
+# Node / Next.js
+# =============================
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# =============================
+# Python
+# =============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+.coverage
+
+# =============================
+# Docker
+# =============================
+docker-compose.override.yml
+
+# =============================
+# IDE / OS
+# =============================
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =============================
+# Logs
+# =============================
+*.log
+logs/
+
+# =============================
+# BEF Decision Log (tracked separately)
+# =============================
+# bef-decisions.md is intentionally tracked

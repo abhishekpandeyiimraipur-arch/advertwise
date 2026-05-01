@@ -1,0 +1,20 @@
+# AdvertWise Backend — Pinned Dependencies (Scaffold)
+# Install: pip install -r requirements.txt
+# NOTE: Will re-pin for Python 3.12 before backend implementation begins.
+
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+pydantic==2.11.1
+pydantic-settings==2.8.1
+asyncpg==0.30.0
+redis==5.2.1
+arq==0.26.1
+httpx==0.28.1
+python-dotenv==1.1.0
+boto3==1.38.9
+PyYAML==6.0.2
+
+# Dev
+pytest==8.3.5
+pytest-asyncio==0.25.3
+ruff==0.11.9
