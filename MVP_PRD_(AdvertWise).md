@@ -160,7 +160,7 @@ User is always refining an existing AI draft — never starting from scratch.
 ┌────────────────────────────────────────────────────────────────────────┐
 │ PHASE 1 · INGESTION                                                    │
 │ InputScrubber (sync) → EXTRACT (Firecrawl API 15s, Markdown output)    │
-│   → Bria RMBG-1.4 (local) → Gemini Vision (GreenZone classification)   │
+│   → BiRefNet (local, Apache 2.0) → Gemini Vision (GreenZone classification)   │
 │   → product_brief                                                      │
 │ 10MB upload cap. Green Zone gate.                                      │
 │ → HD-2 shown with isolation DONE. Confidence flag attached.            │
@@ -550,7 +550,7 @@ ALTER TABLE generations ADD COLUMN pre_topup_status job_status NULL;
 |---|---|---|---|---|
 | URL submit | `POST /generate { url }` | L2 validate → InputScrubber → INSERT `generations` → ARQ enqueue Worker-EXTRACT | → `queued` | — |
 | Image upload | `POST /generate` (multipart) | Same, image → R2 `/uploads/{user_id}/{gen_id}.png` | → `queued` | — |
-| Worker-EXTRACT starts | — | Firecrawl API (15s timeout) → Bria RMBG-1.4 (local) → Gemini Vision | `queued → extracting` | `status_update` |
+| Worker-EXTRACT starts | — | Firecrawl API (15s timeout) → BiRefNet (local, Apache 2.0) → Gemini Vision | `queued → extracting` | `status_update` |
 | Phase 1 complete | — | Writes `isolated_png_url`, `confidence_score`, `category` | `extracting → brief_ready` | `phase_complete` → HD-2 |
 
 **Failure paths (all stay on HD-1):**
@@ -2058,7 +2058,7 @@ Every ECM code routes to a specific React component. **Agent MUST use the Target
 |---|---|---|---|
 | **F-101** | Google 1-Tap Login | OAuth 2.0 · httpOnly JWT 30-day · `session_version` claim | ✅ 1-Tap popup · ✅ Auto-provisions DB · ✅ httpOnly · ✅ `sv` claim validated every request |
 | **F-102** | Free Preview (Starter) | Phase 1–3 access · Max 3 gens · HD-4 render → 403 ECM-006 · `/retry-export` also defensively returns 403 | ✅ Requires login · ✅ Strategy Card shown · ✅ HD-4 render button shows "Upgrade to Render" · ✅ 3-gen limit · ✅ `/retry-export` returns 403 for Starter |
-| **F-103** | Isolation Preview | Bria RMBG-1.4 (local) · Confidence · 15s Firecrawl · 10MB upload · 15MB scraped stream | ✅ <15s · ✅ Ambient confidence border (not pill) · ✅ >10MB → 413 (ECM-014) · ✅ Scraped >15MB → ECM-001 · ✅ Before/after toggle |
+| **F-103** | Isolation Preview | BiRefNet (local, Apache 2.0) · Confidence · 15s Firecrawl · 10MB upload · 15MB scraped stream | ✅ <15s · ✅ Ambient confidence border (not pill) · ✅ >10MB → 413 (ECM-014) · ✅ Scraped >15MB → ECM-001 · ✅ Before/after toggle |
 
 ### [PRD-FEATURES-CREATIVE] · Creative Selection (Phase 2)
 

@@ -357,12 +357,12 @@ Per `[PRD-HD1]`:
 
 ### 4.8 Bounded Scope — Output Surface
 
-| Output class | Allowed | Forbidden |
-|---|---|---|
-| Render duration | Canonical 15 seconds (3s hook B-roll + 9s I2V + 3s CTA B-roll, per `[TDD-VIDEO]-A`) | Any other duration in MVP |
-| Hero asset | The user's actual product (isolated PNG via Bria RMBG-1.4) plus optional curated atmospheric B-roll (faces/hands/locations excluded) | Generic stock product footage · talking-head avatars · human spokespersons · lip-sync · video-to-video stylization |
-| Export formats | Exactly 2 per credit: 1080×1080 (1:1) + 1080×1920 (9:16) | Any other resolution · CSV bulk export · batch render · audio-only export |
-| Compliance burn-in | SGI watermark ("AI Generated Content") FFmpeg drawtext at all resolutions; C2PA manifest cryptographically signed via `c2patool` | Unsigned exports · removable watermarks · avatar disclosure variants |
+| Output class | Allowed                                                                                                                                     | Forbidden |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Render duration | Canonical 15 seconds (3s hook B-roll + 9s I2V + 3s CTA B-roll, per `[TDD-VIDEO]-A`)                                                         | Any other duration in MVP |
+| Hero asset | The user's actual product (isolated PNG via BiRefNet (Apache 2.0) plus optional curated atmospheric B-roll (faces/hands/locations excluded) | Generic stock product footage · talking-head avatars · human spokespersons · lip-sync · video-to-video stylization |
+| Export formats | Exactly 2 per credit: 1080×1080 (1:1) + 1080×1920 (9:16)                                                                                    | Any other resolution · CSV bulk export · batch render · audio-only export |
+| Compliance burn-in | SGI watermark ("AI Generated Content") FFmpeg drawtext at all resolutions; C2PA manifest cryptographically signed via `c2patool`            | Unsigned exports · removable watermarks · avatar disclosure variants |
 
 ### 4.9 Competitive Positioning (Frozen)
 
@@ -438,13 +438,13 @@ To enumerate the system's **safety invariants**: financial, legal, UX, system-pr
 
 ### 5.6 UX & Product Identity Invariants
 
-| ID | Invariant | Enforcement |
-|---|---|---|
-| **U1** | **Product-Visual First.** The user's actual product is the hero asset in every ad. Stock product footage and avatar-led ads are forbidden. | Product comes from `isolated_png_url` (Bria RMBG-1.4). B-Roll planner excludes faces/hands/locations via `chk_broll_safety` constraint. |
-| **U2** | **Green Zone Restriction.** Only 5 categories accepted. Red Zone → `failed_category`. | `[PRD-GREENZONE]` ENUM + Worker-EXTRACT raises `CategoryError`. |
-| **U3** | **Zero Free-Text Primary Inputs.** Open-ended prompting banned. Free-text only inside the 3-turn bounded chat. | UI: enum chips only. Chat: ≤500 chars, ≤20 words, ComplianceGate filtered. |
-| **U4** | **Mandatory Intent Gate.** HD-4 Strategy Card is a hard stop. No render dispatched without explicit human approval click. | `[PRD-HD4]` server-driven 3-mode primary button. No auto-progression. |
-| **U5** | **Co-Pilot Refinement Constraint.** Only Phase 2. Cannot change product facts, introduce unsupported claims, bypass framework constraints, or pivot framework angle. | Prompt-level system instructions in `script-refine.v1.0.0.yaml`. |
+| ID | Invariant | Enforcement                                                                                                                                    |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **U1** | **Product-Visual First.** The user's actual product is the hero asset in every ad. Stock product footage and avatar-led ads are forbidden. | Product comes from `isolated_png_url` (BiRefNet (Apache 2.0). B-Roll planner excludes faces/hands/locations via `chk_broll_safety` constraint. |
+| **U2** | **Green Zone Restriction.** Only 5 categories accepted. Red Zone → `failed_category`. | `[PRD-GREENZONE]` ENUM + Worker-EXTRACT raises `CategoryError`.                                                                                |
+| **U3** | **Zero Free-Text Primary Inputs.** Open-ended prompting banned. Free-text only inside the 3-turn bounded chat. | UI: enum chips only. Chat: ≤500 chars, ≤20 words, ComplianceGate filtered.                                                                     |
+| **U4** | **Mandatory Intent Gate.** HD-4 Strategy Card is a hard stop. No render dispatched without explicit human approval click. | `[PRD-HD4]` server-driven 3-mode primary button. No auto-progression.                                                                          |
+| **U5** | **Co-Pilot Refinement Constraint.** Only Phase 2. Cannot change product facts, introduce unsupported claims, bypass framework constraints, or pivot framework angle. | Prompt-level system instructions in `script-refine.v1.0.0.yaml`.                                                                               |
 
 ### 5.7 System Predictability Invariants
 
@@ -520,7 +520,7 @@ This section is the linear UX contract; it is the projection of §7 (FSM) onto t
 
 **User does:** Submits a URL or uploads an image.
 
-**System does:** L2 validates → InputScrubber sanitizes (per F-501) → INSERT generation row at `status='queued'` → ARQ enqueues `phase1_extract` on `phase1_to_3_workers`. Worker-EXTRACT runs Firecrawl (15s timeout) → Bria RMBG-1.4 (local) → Gemini Vision via gateway. Status transitions `queued → extracting → brief_ready`.
+**System does:** L2 validates → InputScrubber sanitizes (per F-501) → INSERT generation row at `status='queued'` → ARQ enqueues `phase1_extract` on `phase1_to_3_workers`. Worker-EXTRACT runs Firecrawl (15s timeout) → BiRefNet (Apache 2.0) (local) → Gemini Vision via gateway. Status transitions `queued → extracting → brief_ready`.
 
 **Failures that stay on HD-1 (IF / THEN / ELSE branching):**
 
@@ -528,7 +528,7 @@ This section is the linear UX contract; it is the projection of §7 (FSM) onto t
 - **IF** InputScrubber detects prompt-injection or control characters → **THEN** transition to `failed_compliance`, emit ECM-002, surface `[Start Over]`; **ELSE** continue.
 - **IF** Firecrawl exceeds the 15s timeout → **THEN** emit ECM-015, auto-select the upload tab; **ELSE** continue.
 - **IF** the user's upload exceeds 10MB → **THEN** return 413 with ECM-014 inline-validation message; **ELSE** continue.
-- **IF** the scraped image exceeds 15MB → **THEN** raise `CategoryError` and emit ECM-001 with `[Start Over]`; **ELSE** continue to Bria RMBG.
+- **IF** the scraped image exceeds 15MB → **THEN** raise `CategoryError` and emit ECM-001 with `[Start Over]`; **ELSE** continue to BrifNet .
 
 **Mobile:** single-column layout; upload uses `<input type="file" accept="image/*" capture>`.
 
@@ -832,7 +832,7 @@ To make the build order phase-by-phase explicit so the agent always knows which 
 **Entry:** `POST /api/generations` accepted; row inserted at `queued`.
 **Trigger:** ARQ enqueue `phase1_extract` on `phase1_to_3_workers`.
 **Workers involved:** Worker-EXTRACT.
-**External calls:** Firecrawl scraper API (15s timeout) → Bria RMBG-1.4 (local; pipeline globally loaded at worker startup) → Gemini Vision (via gateway, capability='vision').
+**External calls:** Firecrawl scraper API (15s timeout) → BiRefNet (Apache 2.0) (local; pipeline globally loaded at worker startup) → Gemini Vision (via gateway, capability='vision').
 **Outputs:** `isolated_png_url` (R2), `confidence_score`, `product_brief` JSONB (with category, key_features, color_palette, shape, optional price_inr), `agent_motion_suggestion` (only when confidence ≥ 0.90).
 
 **Gates (IF / THEN):**
@@ -1514,7 +1514,7 @@ B-roll structure: `/broll/abstract/`, `/broll/motion/`, `/broll/texture/`, `/bro
 #### 11.11.6 Utilities
 
 - `FIRECRAWLER_API_TOKEN=` — product URL scraping (Phase 1).
-- Bria RMBG-1.4 — runs locally inside Worker-EXTRACT; no API key required.
+- BiRefNet (Apache 2.0— runs locally inside Worker-EXTRACT; no API key required.
 - `c2patool` — local Rust binary for C2PA signing; no API key required.
 
 #### 11.11.7 Authentication (OAuth)
