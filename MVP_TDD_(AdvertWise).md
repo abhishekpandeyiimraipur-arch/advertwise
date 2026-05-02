@@ -84,7 +84,7 @@ AdvertWise is an India-first agentic AI video ad co-pilot. Converts product URLs
 | Image→Video     | Fal.ai (primary), Minimax (fallback)                                                                                                   | Max 180s per candidate. Canonical list: `[TDD-GATEWAY]-A` `CAPABILITY_PROVIDERS`                                                       |
 | Vision          | Gemini Vision Pro, GPT-4V                                                                                                              | `gateway.route(capability="vision")`                                                                                                   |
 | Scraping        | Firecrawl API                                                                                                                          | 15s timeout, clean Markdown output                                                                                                     |
-| Image Isolation | Bria RMBG-1.4 (local)                                                                                                                  | Loaded globally in ARQ process via transformers                                                                                        |
+| Image Isolation | BiRefNet (local, Apache 2.0) — rembg library, model=birefnet-general                                                                                                                  | Loaded globally in ARQ process via rembg library                                                                                        |
 | Safety          | Llama Guard (via Groq)                                                                                                                 | Routed via `gateway.route(capability='moderation')`                                                                                    |
 | C2PA Signing    | c2patool (local binary)<br>Post-sign verification:<br>- MUST run `c2patool --verify`<br>- MUST NOT call any external verification APIs | returncode checked                                                                                                                     |
 | Payments        | Razorpay (UPI)                                                                                                                         | Webhook-driven. HMAC-SHA256. `payment_status` FSM                                                                                      |
@@ -243,7 +243,7 @@ AdvertWise is an India-first agentic AI video ad co-pilot. Converts product URLs
 │ LLM: DeepSeek V3.2,Groq,Gemini, Together AI, SiliconFlow                │
 │ Vision: Gemini Vision Pro, GPT-4V                                       │
 │ Embeddings: OpenAI text-embedding-3-small (1536 dim)                              │
-│ Tools: Firecrawl, Bria RMBG-1.4, c2patool, Razorpay (UPI)
+│ Tools: Firecrawl, BiRefNet, c2patool, Razorpay (UPI)
 │Auth: Google ADC (gcloud auth) strictly enforced; NO JSON keys allowed
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -273,7 +273,7 @@ User pastes URL on HD-1
 PHASE 1: INGESTION
   Worker-EXTRACT:
     ├── Firecrawl API (asyncio.timeout 15s, Markdown return)
-    ├── Bria RMBG-1.4 (loaded globally in ARQ memory)
+    ├── BiRefNet (loaded globally in ARQ memory via rembg)
     └── gateway.route(capability='vision') → Gemini Vision
   → ProductBrief + confidence_score
        │
@@ -503,7 +503,7 @@ Worker-STRATEGIST has absolute zero external API access. CI import-graph blocks 
 
 ### Allowed-Imports Matrix
 
-| Module \ Imports        | `httpx`/`requests` | `gateway.route` | `db` (asyncpg) | `redis_*`  | `transformers (Bria)` | `ffmpeg` subp | `c2patool` subp |
+| Module \ Imports        | `httpx`/`requests` | `gateway.route` | `db` (asyncpg) | `redis_*`  | `rembg (BiRefNet)` | `ffmpeg` subp | `c2patool` subp |
 | ----------------------- | :----------------: | :-------------: | :------------: | :--------: | :-------------------: | :-----------: | :-------------: |
 | `workers/strategist.py` |                    |                 |     ✅ read     | ✅ DB3 read |                       |               |                 |
 | `workers/extract.py`    |                    |        ✅        |       ✅        |            |           ✅           |               |                 |
@@ -2062,9 +2062,11 @@ import asyncio
 import httpx
 from transformers import pipeline
 
-# Load Bria globally at worker startup (warm boot — saves ~3s per gen)
-logger.info("Warming up Bria RMBG-1.4 model into memory...")
-GLOBAL_BG_REMOVER = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
+# Load BiRefNet globally at worker startup (warm boot — saves ~3s per gen)
+# Apache 2.0 license — commercially clean replacement for Bria RMBG-1.4
+logger.info("Warming up BiRefNet model into memory...")
+from rembg import new_session
+GLOBAL_BG_SESSION = new_session("birefnet-general")
 
 class WorkerExtract:
     """Phase 1. Pillar 5: 15s Firecrawl timeout. 10MB upload cap."""
@@ -2079,7 +2081,7 @@ class WorkerExtract:
         else:
             raise ValueError("Either source_url or source_image_url required")
 
-        # Bria runs in thread pool — keeps the event loop free
+        # BiRefNet runs in thread pool — keeps the event loop free
         isolated_png = await asyncio.to_thread(GLOBAL_BG_REMOVER, image_bytes)
         isolated_url = await self._upload_to_r2(gen_id, "isolated/product.png", isolated_png)
         
@@ -5519,7 +5521,7 @@ This matrix is a flat index from every PRD functional ID to its canonical TDD im
 |---|---|---|
 |**F-101**|Google 1-Tap Login (OAuth 2.0, JWT session versioning)|`[TDD-SECURITY]-A` + `[TDD-OVERVIEW]`|
 |**F-102**|Free Preview (Starter tier limits & gating)|`[TDD-API]-D` (ECM-006) + `[TDD-API]-G`|
-|**F-103**|Isolation Preview (Firecrawl + Bria + size limits)|`[TDD-WORKERS]-B` + `[TDD-TYPES]-A`|
+|**F-103**|Isolation Preview (Firecrawl + BiRefNet + size limits)|`[TDD-WORKERS]-B` + `[TDD-TYPES]-A`|
 
 ### [TDD-TRACE]-B · Creative Selection (Phase 2)
 

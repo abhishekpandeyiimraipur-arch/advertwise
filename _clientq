@@ -1,0 +1,168 @@
+warning: in the working copy of 'backend/app/api/routes/stubs.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/app/main.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/backend/app/api/routes/stubs.py b/backend/app/api/routes/stubs.py[m
+[1mindex b8f890c..f0ab614 100644[m
+[1m--- a/backend/app/api/routes/stubs.py[m
+[1m+++ b/backend/app/api/routes/stubs.py[m
+[36m@@ -1,54 +1,84 @@[m
+ from fastapi import APIRouter, Request, Depends[m
+ from typing import Dict, Any[m
+ import logging[m
+[31m-from app.gateway import idempotent, AdvertWiseException, ECMCode[m
+[32m+[m
+[32m+[m[32m# Standardized Infrastructure Imports[m
+[32m+[m[32m# We use 'app.infra_gateway' to bypass the folder shadowing issue[m
+[32m+[m[32mfrom app.infra_gateway import idempotent, AdvertWiseException, ECMCode[m
+ from app.guards.compliance_gate import ComplianceGate[m
+ from app.guards.cost_guard import CostGuard[m
+ [m
+ logger = logging.getLogger(__name__)[m
+ router = APIRouter()[m
+[32m+[m
+[32m+[m[32m# Initialize the ComplianceGate (Checks for prompt safety)[m
+ compliance_gate = ComplianceGate()[m
+ [m
+ @router.post("/generate")[m
+[32m+[m[32m# IDEMPOTENCY: Prevents duplicate generations if the user clicks 'submit' twice[m
+ @idempotent(ttl=300, action_key="generate", cache_only_2xx=True)[m
+ async def generate_stub(request: Request, payload: Dict[str, Any], gen_id: str = "mock-gen-123", user_id: str = "mock-user"):[m
+[32m+[m[32m    """[m
+[32m+[m[32m    Primary endpoint for AdvertWise video generation.[m[41m [m
+[32m+[m[32m    Flow: Compliance -> Cost Check -> Wallet Lock -> Mock Success[m
+[32m+[m[32m    """[m
+     logger.info(f"==> Received /generate request for gen_id={gen_id}")[m
+     [m
+[31m-    # 1. ComplianceGate (FIRST in flow)[m
+[32m+[m[32m    # --- 1. COMPLIANCE GATE (Foundational Requirement) ---[m
+[32m+[m[32m    # We check the prompt immediately to avoid wasting resources on unsafe content[m
+     text = payload.get("prompt", "")[m
+     comp_res = await compliance_gate.check_input(text)[m
+     logger.info(f"Compliance check result: safe={comp_res.safe}")[m
+[32m+[m[41m    [m
+     if not comp_res.safe:[m
+[32m+[m[32m        # Raises custom Exception mapped to ECM code for clear debugging[m
+         raise AdvertWiseException(ECMCode.COMPLIANCE_FLAGGED, 400, {"reason": comp_res.reason})[m
+ [m
+[31m-    # 2. CostGuard pre_check[m
+[32m+[m[32m    # --- 2. COST GUARD (Budget Control) ---[m
+[32m+[m[32m    # Verifies if the request fits within the user's plan limits[m
+     redis_mgr = request.app.state.redis_mgr[m
+[31m-    cost_guard = CostGuard(redis_db2=redis_mgr.db2, db_pool=None) # Mock db_pool as we don't insert here[m
+[31m-    est_cost = 0.50[m
+[32m+[m[32m    # Note: db_pool is None here as we are in a 'Stub' mode for Gate 1[m
+[32m+[m[32m    cost_guard = CostGuard(redis_db2=redis_mgr.db2, db_pool=None)[m[41m [m
+[32m+[m[41m    [m
+[32m+[m[32m    est_cost = 0.50 # Mocked cost for validation[m
+     plan_tier = "essential"[m
+[32m+[m[41m    [m
+     cost_res = await cost_guard.pre_check(gen_id, est_cost, plan_tier)[m
+     logger.info(f"CostGuard pre_check result: ok={cost_res.ok}")[m
+[32m+[m[41m    [m
+     if not cost_res.ok:[m
+         raise AdvertWiseException(ECMCode.BUDGET_LIMIT, 429)[m
+ [m
+[31m-    # 3. Redis Lua wallet_lock[m
+[32m+[m[32m    # --- 3. REDIS LUA WALLET LOCK (Concurrency Safety) ---[m
+[32m+[m[32m    # Uses high-speed Lua scripting in Redis to lock credits before the heavy AI work begins[m
+[32m+[m[32m    # This prevents 'Double Spending' of credits[m
+     lock_success = await redis_mgr.execute_wallet_lock(user_id, gen_id, credits=1)[m
+     logger.info(f"wallet_lock.lua execution result: {lock_success}")[m
+[32m+[m[41m    [m
+     if lock_success == 0:[m
+         raise AdvertWiseException(ECMCode.INSUFFICIENT_FUNDS, 402)[m
+ [m
+[31m-    # 4. Dummy response[m
+[31m-    return {"status": "success", "gen_id": gen_id, "message": "Generation wired and validated!"}[m
+[32m+[m[32m    # --- 4. SUCCESS RESPONSE ---[m
+[32m+[m[32m    # If we reached here, the full backend wiring (Redis + Postgres logic) is validated[m
+[32m+[m[32m    return {[m
+[32m+[m[32m        "status": "success",[m[41m [m
+[32m+[m[32m        "gen_id": gen_id,[m[41m [m
+[32m+[m[32m        "message": "AdvertWise Foundation wired and validated!"[m
+[32m+[m[32m    }[m
+ [m
+ @router.post("/chat")[m
+ @idempotent(ttl=300, action_key="chat", cache_only_2xx=True)[m
+ async def chat_stub(request: Request, payload: Dict[str, Any], gen_id: str = "mock-gen-chat", user_id: str = "mock-user"):[m
+[32m+[m[32m    """[m
+[32m+[m[32m    Lightweight chat endpoint for agentic interaction validation.[m
+[32m+[m[32m    """[m
+     logger.info(f"==> Received /chat request for gen_id={gen_id}")[m
+     [m
+[31m-    # 1. ComplianceGate[m
+[32m+[m[32m    # 1. ComplianceGate check for chat messages[m
+     text = payload.get("message", "")[m
+     comp_res = await compliance_gate.check_input(text)[m
+[32m+[m[41m    [m
+     if not comp_res.safe:[m
+         raise AdvertWiseException(ECMCode.COMPLIANCE_FLAGGED, 400)[m
+ [m
+[31m-    return {"status": "success", "message": "Chat wired"}[m
+[32m+[m[32m    return {"status": "success", "message": "Chat module wired correctly"}[m
+\ No newline at end of file[m
+[1mdiff --git a/backend/app/main.py b/backend/app/main.py[m
+[1mindex dfcf0b2..9b5eb81 100644[m
+[1m--- a/backend/app/main.py[m
+[1m+++ b/backend/app/main.py[m
+[36m@@ -1,37 +1,50 @@[m
+[31m-from fastapi import FastAPI[m
+[32m+[m[32mfrom fastapi import FastAPI, Request[m
+ from contextlib import asynccontextmanager[m
+ import logging[m
+ [m
+[31m-from app.redis_client import RedisManager[m
+[31m-from app.gateway import add_exception_handlers[m
+[31m-from app.api.routes import router[m
+[32m+[m[32m# Infra imports (collision-proof)[m
+[32m+[m[32mfrom .infra_redis import RedisManager[m
+[32m+[m[32mfrom .infra_gateway import add_exception_handlers[m
+[32m+[m[32mfrom .api.routes import router[m
+ [m
+ logging.basicConfig(level=logging.INFO)[m
+ logger = logging.getLogger(__name__)[m
+ [m
+[32m+[m[32m# Initialize Redis Manager (singleton for app lifecycle)[m
+ redis_mgr = RedisManager()[m
+ [m
+[32m+[m
+ @asynccontextmanager[m
+ async def lifespan(app: FastAPI):[m
+     logger.info("Initializing application lifecycle...")[m
+[32m+[m
+[32m+[m[32m    # Connect to Redis[m
+     await redis_mgr.connect()[m
+[31m-    [m
+[31m-    # Expose connections for decorators and routes[m
+[32m+[m
+[32m+[m[32m    # Inject into app.state (DI contract)[m
+     app.state.redis_db0 = redis_mgr.db0[m
+     app.state.redis_db2 = redis_mgr.db2[m
+     app.state.redis_db5 = redis_mgr.db5[m
+     app.state.redis_mgr = redis_mgr[m
+[31m-    [m
+[32m+[m
+     logger.info("Application wiring complete. Redis loaded.")[m
+[32m+[m
+     yield[m
+[31m-    [m
+[32m+[m
+     logger.info("Tearing down application lifecycle...")[m
+     await redis_mgr.disconnect()[m
+ [m
+[31m-app = FastAPI(title="AdvertWise Wiring Proof", lifespan=lifespan)[m
+ [m
+[31m-# 1. Register global exception handlers mapping to ECM codes[m
+[32m+[m[32m# Initialize FastAPI[m
+[32m+[m[32mapp = FastAPI([m
+[32m+[m[32m    title="AdvertWise Wiring Proof",[m
+[32m+[m[32m    lifespan=lifespan[m
+[32m+[m[32m)[m
+[32m+[m
+[32m+[m[32m# Register global exception handlers[m
+ add_exception_handlers(app)[m
+ [m
+[31m-# 2. Include the stub routes[m
+[32m+[m[32m# Include API routes[m
+ app.include_router(router)[m
+[41m+[m
+[41m+[m
