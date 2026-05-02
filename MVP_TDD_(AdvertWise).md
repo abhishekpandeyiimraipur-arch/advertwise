@@ -122,23 +122,24 @@ AdvertWise is an India-first agentic AI video ad co-pilot. Converts product URLs
 
 **Fulfills PRD Requirement:** `[PRD-NON-NEGOTIABLES]`, `[PRD-PIPELINE]`
 
-| Pattern                                           | Why Banned                                                                                                                                                                                                                                                                              | Pillar |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| Multi-Agent Negotiation (A2A)                     | Massive latency, high token costs, unpredictable UX                                                                                                                                                                                                                                     | 1      |
-| MCP Servers / Tool Servers                        | We orchestrate, not host tool servers                                                                                                                                                                                                                                                   | 1      |
-| Microservices Decomposition                       | Solo dev. Modularity via Python Deep Modules                                                                                                                                                                                                                                            | 7      |
-| Sagas / Transactional Outbox                      | Over-engineering. Compensating transactions only                                                                                                                                                                                                                                        | 7      |
-| Horizontal Scaling / Load Balancers               | Single CCX32. Vertical first                                                                                                                                                                                                                                                            | 6      |
-| GPU Fleet / Self-Hosted Models                    | All inference via 3rd-party APIs                                                                                                                                                                                                                                                        | 2      |
-| DB Sharding / Replication                         | Single Neon handles 10k-20k users                                                                                                                                                                                                                                                       | 4      |
-| Global ASGI Response-Cache Middleware             | Starlette middleware that consumes `response.body()` after `call_next()` breaks SSE streams. Use route decorators                                                                                                                                                                       | 3      |
-| `sessionStorage` for cross-tab state              | sessionStorage is per-tab. Use `localStorage` + `storage` event listener                                                                                                                                                                                                                | 4      |
-| `-shortest` flag in FFmpeg compose                | Truncates to shortest input — silences or chops CTAs                                                                                                                                                                                                                                    | 3      |
-| **Worker-COPY open-ended generation**             | "Generate 5 filter 2" wastes tokens, unpredictable variety. Use `framework_router → generate_per_framework`                                                                                                                                                                             | 1 + 2  |
-| **`phase4_coordinator` enqueueing worker_export** | Couples render/export economics. HD-6 retries must preserve ~₹10 Phase-4 assets. Coordinator STOPS at `preview_ready`                                                                                                                                                                   | 3 + 7  |
-| **Single-branch DLQ**                             | Dual-branch required. Dispatch by `job.function_name`                                                                                                                                                                                                                                   | 5      |
-| **Hardcoded webhook restoration target**          | Razorpay webhook MUST read `pre_topup_status` and restore atomically. Hardcoding `status='strategy_preview'` silently kicks HD-6-origin users back to HD-4                                                                                                                              | 4      |
-| **Presigned R2 URLs inside workers**              | Workers run minutes after URL minting; 10-min TTL expires. Workers MUST use credentialed `boto3` access exclusively. Presigned URLs are strictly forbidden inside workers. B-roll assets MUST be stored in Cloudflare R2 using structured folders (e.g. `/broll/category/archetype/`).  | 5      |
+| Pattern                                           | Why Banned                                                                                                                                                                                                                                                                             | Pillar |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Multi-Agent Negotiation (A2A)                     | Massive latency, high token costs, unpredictable UX                                                                                                                                                                                                                                    | 1      |
+| MCP Servers / Tool Servers                        | We orchestrate, not host tool servers                                                                                                                                                                                                                                                  | 1      |
+| Microservices Decomposition                       | Solo dev. Modularity via Python Deep Modules                                                                                                                                                                                                                                           | 7      |
+| Sagas / Transactional Outbox                      | Over-engineering. Compensating transactions only                                                                                                                                                                                                                                       | 7      |
+| Horizontal Scaling / Load Balancers               | Single CCX32. Vertical first                                                                                                                                                                                                                                                           | 6      |
+| GPU Fleet / Self-Hosted Models                    | All inference via 3rd-party APIs                                                                                                                                                                                                                                                       | 2      |
+| DB Sharding / Replication                         | Single Neon handles 10k-20k users                                                                                                                                                                                                                                                      | 4      |
+| Global ASGI Response-Cache Middleware             | Starlette middleware that consumes `response.body()` after `call_next()` breaks SSE streams. Use route decorators                                                                                                                                                                      | 3      |
+| `sessionStorage` for cross-tab state              | sessionStorage is per-tab. Use `localStorage` + `storage` event listener                                                                                                                                                                                                               | 4      |
+| `-shortest` flag in FFmpeg compose                | Truncates to shortest input — silences or chops CTAs                                                                                                                                                                                                                                   | 3      |
+| **Worker-COPY open-ended generation**             | "Generate 5 filter 2" wastes tokens, unpredictable variety. Use `framework_router → generate_per_framework`                                                                                                                                                                            | 1 + 2  |
+| **`phase4_coordinator` enqueueing worker_export** | Couples render/export economics. HD-6 retries must preserve ~₹10 Phase-4 assets. Coordinator STOPS at `preview_ready`                                                                                                                                                                  | 3 + 7  |
+| **Single-branch DLQ**                             | Dual-branch required. Dispatch by `job.function_name`                                                                                                                                                                                                                                  | 5      |
+| **Hardcoded webhook restoration target**          | Razorpay webhook MUST read `pre_topup_status` and restore atomically. Hardcoding `status='strategy_preview'` silently kicks HD-6-origin users back to HD-4                                                                                                                             | 4      |
+| **Presigned R2 URLs inside workers**              | Workers run minutes after URL minting; 10-min TTL expires. Workers MUST use credentialed `boto3` access exclusively. Presigned URLs are strictly forbidden inside workers. B-roll assets MUST be stored in Cloudflare R2 using structured folders (e.g. `/broll/category/archetype/`). | 5      |
+| Zero-Shadowing policy                             | no module/package may reuse stdlib names or shadow sibling packages; canonical backend names are infra_* and schemas/* only.                                                                                                                                                           |        |
 
 ---
 
@@ -175,7 +176,7 @@ AdvertWise is an India-first agentic AI video ad co-pilot. Converts product URLs
 │   preview_ready → export_queued.                                         │
 │ /retry-export: 9-step atomic chain (audit→lock→state→enqueue).          │
 │ Lock-fail on either path: ATOMIC write of pre_topup_status +             │
-│   status='awaiting_funds' in single UPDATE.                              │
+│   status='awaiting_funds' in single UPDATE.                             │
 └─────────────────────────────────────────────────────────────────────────┘
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -246,6 +247,13 @@ AdvertWise is an India-first agentic AI video ad co-pilot. Converts product URLs
 │Auth: Google ADC (gcloud auth) strictly enforced; NO JSON keys allowed
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+
+
+
+
+
+
 
 ---
 
@@ -507,10 +515,10 @@ Worker-STRATEGIST has absolute zero external API access. CI import-graph blocks 
 | `workers/reflect.py`    |                    |        ✅        |       ✅        |            |                       |               |                 |
 | `workers/compose.py`    |                    |                 |       ✅        |            |                       |       ✅       |                 |
 | `workers/export.py`     |                    |                 |       ✅        |            |                       |       ✅       |        ✅        |
-| `gateway/gateway.py`    |         ✅          |        —        |       ✅        |   ✅ DB3    |                       |               |                 |
+| `infra_gateway.py`      |         ✅          |        —        |       ✅        |   ✅ DB3    |                       |               |                 |
 | `api/routes/*.py` (L2)  |                    |                 |       ✅        |     ✅      |                       |               |                 |
 
-**Golden rule:** Only `gateway/gateway.py` imports external HTTP clients. Worker-SAFETY routes through `gateway.route(capability="moderation")` like every other worker — the prior direct-OpenAI carve-out is REMOVED to close the CI cost trap and the import-graph hole. CI `strategist-sandbox` hard-fails on violation.
+**Golden rule:** Only `infra_gateway.py` imports external HTTP clients. Worker-SAFETY routes through `gateway.route(capability="moderation")` like every other worker — the prior direct-OpenAI carve-out is REMOVED to close the CI cost trap and the import-graph hole. CI `strategist-sandbox` hard-fails on violation.
 
 ```python
 # /ci/strategist_sandbox_check.py — AST-based import guard
@@ -649,7 +657,7 @@ advertwise/
 │   │   ├── guards/                  # ComplianceGate · OutputGuard
 │   │   ├── dlq/                     # on_job_dead · dual-branch routing
 │   │   ├── models/                  # Pydantic schemas
-│   │   ├── types/                   # shared enums (AdFramework, FrameworkAngle, PreTopupStatus)
+│   │   ├── schemas/                   # shared enums (AdFramework, FrameworkAngle, PreTopupStatus)
 │   │   ├── prompts/                 # PromptOps YAML catalog
 │   │   ├── lua/                     # wallet_lock, wallet_consume, wallet_refund, circuit_breaker
 │   │   ├── takedown/                # IT Rules 2026 auto-takedown pipeline
@@ -4080,11 +4088,30 @@ async def razorpay_webhook(request: Request, db=Depends(get_db)):
 
 ---
 
-## [TDD-REDIS] · Redis Key Design & Lua Scripts
+## [TDD-REDIS] · Redis Architecture, Key Design & Lua Scripts
 
 **Fulfills PRD Requirement:** `[PRD-PAYMENT-FSM]`, `[PRD-PRETOPUP]`, `[PRD-FEATURES-PAYMENT]`, `[PRD-IDEMPOTENCY]`, `[PRD-FEATURES-INFRA]`, `[PRD-NON-NEGOTIABLES]`
 
 Redis is the authoritative wallet surface at runtime — Postgres holds the immutable ledger, but Redis is the fast path. The 6-DB namespace split is a Bulkhead pattern: a hot key in one DB cannot starve another. All wallet mutations are Lua-scripted to guarantee atomicity and prevent double-spend race conditions.
+
+
+### [TDD-REDIS]-INIT · Redis Initialization & Access Pattern
+
+Redis is initialized during FastAPI lifespan startup in `main.py`.
+
+- A single Redis manager instance is created and attached to `app.state.redis_mgr`.
+- All guards, routes, and workers MUST access Redis via:
+  `request.app.state.redis_mgr`
+
+**Rules:**
+- No module may instantiate its own Redis client.
+- All Redis usage must go through the shared manager.
+- Logical DB separation (DB0–DB5) is handled inside `infra_redis.py`.
+
+**Rationale:**
+- Prevents connection duplication
+- Ensures consistent locking and idempotency behavior
+- Aligns with Zero-Shadowing and infra_* modular architecture
 
 ### [TDD-REDIS]-A · Redis 6-DB Namespace Scheme
 
@@ -5404,7 +5431,7 @@ This section is strictly for the Agentic IDE (the AI coding assistant). It defin
 
 **Phase A: Core Foundations & State**
 
-1. `app/types/schemas.py` (Enums, `GenerationState`, Pydantic models)
+1. `app/schemas/schemas.py` (Enums, `GenerationState`, Pydantic models)
     
 2. `app/db/migrations/001_initial.sql` (Schema per `[TDD-POSTGRES]`)
 
@@ -5428,7 +5455,7 @@ This section is strictly for the Agentic IDE (the AI coding assistant). It defin
 6. `app/redis/lua/circuit_breaker.lua`
     
 
-**Phase B: Utilities, Gateway & Guards** 7. `app/gateway/gateway.py` (ModelGateway: Aggregator routing & CB checks) 8. `app/services/cost_guard.py` (Financial ceiling enforcement) 9. `app/services/compliance_gate.py` (Regex prompt-injection guard) 10. `app/services/output_guard.py` (Brand safety & PII guard) 11. `app/services/style_memory.py` (pgvector flywheel upsert/retrieval)
+**Phase B: Utilities, Gateway & Guards** 7. `app/infra_gateway.py` (ModelGateway: Aggregator routing & CB checks) 8. `app/services/cost_guard.py` (Financial ceiling enforcement) 9. `app/services/compliance_gate.py` (Regex prompt-injection guard) 10. `app/services/output_guard.py` (Brand safety & PII guard) 11. `app/services/style_memory.py` (pgvector flywheel upsert/retrieval)
 
 **Phase C: AI Workers (Phases 1-3)** 12. `app/prompts/copywriting/*.yaml` (All LLM prompt templates) 13. `app/workers/extract.py` (Firecrawl integration) 14. `app/workers/copy.py` (Router, Gen, and Refine modes) 15. `app/workers/critic.py` (3-script internal scoring) 16. `app/workers/phase2_chain.py` (The orchestrator for extracting/scoring scripts) 17. `app/workers/strategist.py` (Surfaces strategy card & reads style memory) 18. `app/workers/copilot.py` (HD-3 Chat execution via 5-Stage Chain)
 
@@ -5998,7 +6025,7 @@ This section defines the deterministic, static-response fixtures every external 
 **Purpose:** The physical switch that disconnects the Gateway from the internet during testing.
 
 ```
-# app/gateway/gateway.py
+# app/infra_gateway.py
 import os
 from app.stubs import stub_registry
 
@@ -6120,7 +6147,7 @@ These are the strict rules the AI Agent must follow when interacting with the Te
 
 1. **Unconditional CI Mode:** `AW_API_MODE=stub` is set unconditionally in CI via `.github/workflows/*.yml`. Production and Staging always set `AW_API_MODE=live`. Any Pull Request that attempts to remove the CI environment line is blocked by the `compliance-gate` check.
     
-2. **Import Graph Isolation:** Stubs live exclusively in `app/stubs/` and are imported _only_ from `app/gateway/gateway.py` at initialization. **No production code path** is allowed to import from `app/stubs/` directly. This is mechanically enforced by `ci/check_stub_import_graph.py`.
+2. **Import Graph Isolation:** Stubs live exclusively in `app/stubs/` and are imported _only_ from `app/infra_gateway.py' at initialization. **No production code path** is allowed to import from `app/stubs/` directly. This is mechanically enforced by `ci/check_stub_import_graph.py`.
     
 3. **The Four Properties:** Stub data must be **Deterministic**, **Offline**, **Schema-Valid**, and **COGS-Accurate**. Any stub that violates one of these properties is a bug, not a feature.
     

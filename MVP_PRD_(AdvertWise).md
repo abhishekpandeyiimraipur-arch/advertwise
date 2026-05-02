@@ -272,6 +272,24 @@ Backed by Postgres ENUM `green_zone_category` → TDD `[TDD-ENUMS]`.
 
 ---
 
+
+## [PRD-TECH-CONSTRAINTS] · Technical Constraints
+
+- PEP 8 namespace isolation is mandatory; no folder/file shadowing of stdlib modules or sibling packages.
+- Backend canonical paths are `app/infra_gateway.py`, `app/infra_redis.py`, and `app/schemas/`.
+- - Gate 1 is considered Verified only when:
+  - `/api/generate` returns ECM-007 middleware response
+  - Redis is active via `app.state.redis_mgr`
+  - Postgres connectivity is confirmed
+
+
+
+
+
+
+
+
+
 ## [PRD-COMPETITION] · Competitive Intelligence
 
 ### Direct Competitors
@@ -2155,6 +2173,9 @@ PagerDuty is intentionally excluded to reduce operational complexity during MVP.
 | Theme | Work Item | Features | IDE Build Hints |
 |---|---|---|---|
 | Core Infra | DB + 22-State + Schema v20 | F-601, F-605 | `"22-state ENUM. Partitioned audit_log. generations.export_retry_count INTEGER DEFAULT 0. generations.pre_topup_status job_status NULL with CHECK (pre_topup_status IS NULL) = (status <> 'awaiting_funds'). wallet_transactions split schema (payment_status vs status). Partial UNIQUE INDEX on (gen_id) WHERE status='locked' and on (razorpay_payment_id) WHERE type='topup' AND payment_status='captured'. Postgres trigger validates new transitions."` |
+Gate 1 status: Verified (ECM-007 middleware response).
+
+
 | Auth | Google OAuth | F-101 | `"NextAuth.js + Google. httpOnly. session_version claim."` |
 | Economics | Payment + Locks + Retry Ledger + pre_topup_status | F-301, F-302, F-303 | `"Redis Lua per-gen lock fields. Postgres ledger row-first. payment_status for topups ONLY; .status for locks/consumes/refunds ONLY. Partial UNIQUE INDEX guards double-lock. /approve-strategy lock-fail writes pre_topup_status='strategy_preview' atomically with status='awaiting_funds'. /webhook/razorpay on 'captured' restores status from pre_topup_status and NULLs — multi-row safe."` |
 | Cost Protection | CostGuard (chat) | F-603, F-604 | `"COGS recorded IMMEDIATELY after LLM return. Check before /chat. Ceiling disables chat input."` |
