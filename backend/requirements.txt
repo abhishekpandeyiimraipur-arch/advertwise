@@ -22,3 +22,4 @@ firecrawl-py
 pytest==8.3.5
 pytest-asyncio==0.25.3
 ruff==0.11.9
+PyJWT>=2.8.0
