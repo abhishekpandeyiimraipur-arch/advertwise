@@ -2050,7 +2050,9 @@ user_prompt_template: |
 
 ### [TDD-WORKERS]-B · Worker-EXTRACT
 
-**Fulfills PRD Requirement:** `[PRD-HD1]`, `[PRD-HD2]`, `[PRD-PIPELINE]` (Phase 1), `[PRD-CATEGORY]`, `[PRD-GREENZONE]`, `[PRD-CONFIDENCE]` Phase 1 entry worker. 15s Firecrawl timeout; 10MB upload cap at L2; 15MB scraped image cap inside the worker. Vision pass returns `product_brief + confidence`; confidence ≥ 0.90 triggers `agent_motion_suggestion`; Red Zone categories raise `CategoryError` → `failed_category`. 
+**Fulfills PRD Requirement:** `[PRD-HD1]`, `[PRD-HD2]`, `[PRD-PIPELINE]` (Phase 1), `[PRD-CATEGORY]`, `[PRD-GREENZONE]`, `[PRD-CONFIDENCE]` Phase 1 entry worker. 15s Firecrawl timeout; 10MB upload cap at L2; 15MB scraped image cap inside the worker. Vision pass returns product_brief only. confidence_score
+is computed deterministically from BiRefNet alpha mask
+(GAP-10). No LLM call is involved for confidence.; confidence ≥ 0.90 triggers `agent_motion_suggestion`; Red Zone categories raise `CategoryError` → `failed_category`. 
 
 
 
@@ -2065,7 +2067,7 @@ from transformers import pipeline
 # Load BiRefNet globally at worker startup (warm boot — saves ~3s per gen)
 # Apache 2.0 license — commercially clean replacement for Bria RMBG-1.4
 logger.info("Warming up BiRefNet model into memory...")
-from rembg import new_session
+from rembg import remove, new_session
 GLOBAL_BG_SESSION = new_session("birefnet-general")
 
 class WorkerExtract:
@@ -2082,7 +2084,9 @@ class WorkerExtract:
             raise ValueError("Either source_url or source_image_url required")
 
         # BiRefNet runs in thread pool — keeps the event loop free
-        isolated_png = await asyncio.to_thread(GLOBAL_BG_REMOVER, image_bytes)
+        isolated_pil = await asyncio.to_thread(
+            remove, image_bytes, session=GLOBAL_BG_SESSION
+        )
         isolated_url = await self._upload_to_r2(gen_id, "isolated/product.png", isolated_png)
         
         vision_result = await self.gateway.route(
@@ -2094,7 +2098,7 @@ class WorkerExtract:
             }
         )
         
-        confidence = self._compute_confidence(vision_result, isolated_png)
+        confidence = self._compute_confidence(isolated_pil)
         
         product_brief = {
             "product_name": vision_result["product_name"],
@@ -2119,6 +2123,25 @@ class WorkerExtract:
             "product_shape": product_brief["shape"],
             "agent_motion_suggestion": motion_suggestion,
         }
+
+    def _compute_confidence(self, isolated_pil) -> float:
+        """
+        Deterministic isolation quality score — GAP-10.
+        Input : PIL Image with alpha channel (BiRefNet output).
+        Output: float [0.0, 1.0]
+
+        Tuning levers (tweakable without PRD/BEF changes):
+          alpha > 128  — foreground pixel threshold
+          0.4          — soft-edge penalty weight
+        """
+        import numpy as np
+        alpha = np.array(isolated_pil.getchannel("A"))
+        foreground_ratio = float((alpha > 128).mean())
+        soft_edge_ratio  = float(
+            ((alpha > 10) & (alpha < 245)).mean()
+        )
+        raw = foreground_ratio * (1.0 - soft_edge_ratio * 0.4)
+        return round(min(max(raw, 0.0), 1.0), 4)
 
     async def _download_image(self, url):
         async with httpx.AsyncClient(timeout=FIRECRAWL_TIMEOUT_SECONDS) as client:
