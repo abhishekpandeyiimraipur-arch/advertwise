@@ -1,12 +1,15 @@
 """
 L5: ModelGateway — Phase 1 Vision implementation.
-Calls Gemini Vision API for product analysis.
+Primary: Together AI (Llama Vision) — free tier
+Fallback: Gemini 2.0 Flash — paid tier
+Fallback 2: OpenAI GPT-4o — most reliable
 """
 import os
 import base64
 import json
 import logging
-import google.generativeai as genai
+import asyncio
+import httpx
 from PIL import Image
 import io
 
@@ -19,55 +22,145 @@ Analyze this product image and return a JSON object with exactly these fields:
   "category": "one of: d2c_beauty, packaged_food, hard_accessories, electronics, home_kitchen",
   "price_inr": null or number — estimated Indian retail price,
   "key_features": ["list", "of", "3-5", "key", "features"],
-  "color_palette": ["#hex1", "#hex2", "#hex3"] — dominant product colors,
+  "color_palette": ["#hex1", "#hex2", "#hex3"],
   "shape": "one of: bottle, box, pouch, tube, jar, can, irregular"
 }
-
 Return ONLY the JSON object. No markdown, no explanation, no backticks."""
+
+
+def _parse_json_response(raw: str) -> dict:
+    clean = raw.strip()
+    if clean.startswith("```"):
+        parts = clean.split("```")
+        clean = parts[1]
+        if clean.startswith("json"):
+            clean = clean[4:]
+    return json.loads(clean.strip())
 
 
 class ModelGateway:
     def __init__(self):
-        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-        self.vision_model = genai.GenerativeModel("gemini-2.0-flash")
+        self.together_key = os.environ.get("TOGETHER_API_KEY", "")
+        self.gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        self.openai_key = os.environ.get("OPEN_AI_API_KEY", "")
 
     async def route(self, capability: str, input_data: dict) -> dict:
         if capability == "vision":
-            return await self._vision_analysis(input_data)
+            return await self._vision_with_fallback(input_data)
         raise NotImplementedError(f"Unknown capability: {capability}")
 
-    async def _vision_analysis(self, input_data: dict) -> dict:
-        import asyncio
-        image_b64 = input_data["image_b64"]
+    async def _vision_with_fallback(self, input_data: dict) -> dict:
         gen_id = input_data.get("gen_id", "unknown")
+        image_b64 = input_data["image_b64"]
+        
+        providers = [
+            ("together_ai", self._call_together_vision),
+            ("gemini",      self._call_gemini_vision),
+            ("openai",      self._call_openai_vision),
+        ]
+        
+        last_error = None
+        for name, fn in providers:
+            try:
+                logger.info(f"Vision attempt via {name} for gen_id={gen_id}")
+                result = await fn(image_b64, gen_id)
+                logger.info(f"Vision success via {name} for gen_id={gen_id}")
+                return result
+            except Exception as e:
+                logger.warning(f"Vision provider {name} failed for gen_id={gen_id}: {e}")
+                last_error = e
+                continue
+        
+        raise Exception(f"All vision providers failed for gen_id={gen_id}. Last error: {last_error}")
 
-        image_bytes = base64.b64decode(image_b64)
-        image = Image.open(io.BytesIO(image_bytes))
+    async def _call_together_vision(self, image_b64: str, gen_id: str) -> dict:
+        payload = {
+            "model": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_b64}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": VISION_PROMPT
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 512,
+            "temperature": 0.1
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.together.xyz/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.together_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+            return _parse_json_response(raw)
 
-        def call_gemini():
-            response = self.vision_model.generate_content([
-                VISION_PROMPT,
-                image
-            ])
-            return response.text
+    async def _call_gemini_vision(self, image_b64: str, gen_id: str) -> dict:
+        import google.generativeai as genai
+        from PIL import Image as PILImage
+        genai.configure(api_key=self.gemini_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        image = PILImage.open(io.BytesIO(base64.b64decode(image_b64)))
+        
+        def call():
+            return model.generate_content([VISION_PROMPT, image]).text
+        
+        raw = await asyncio.to_thread(call)
+        return _parse_json_response(raw)
 
-        try:
-            raw = await asyncio.to_thread(call_gemini)
-            # Strip markdown fences if present
-            clean = raw.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
-            result = json.loads(clean.strip())
-            logger.info(f"Gemini Vision success for gen_id={gen_id}: category={result.get('category')}")
-            return result
-        except Exception as e:
-            logger.error(f"Gemini Vision failed for gen_id={gen_id}: {e}")
-            raise
+    async def _call_openai_vision(self, image_b64: str, gen_id: str) -> dict:
+        payload = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_b64}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": VISION_PROMPT
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 512,
+            "temperature": 0.1
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.openai_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+            return _parse_json_response(raw)
 
 
-# Singleton — built once at worker startup
 _gateway_instance = None
 
 def get_gateway() -> ModelGateway:
@@ -77,11 +170,9 @@ def get_gateway() -> ModelGateway:
     return _gateway_instance
 
 
-# Backwards compat — StubGateway kept for reference only
 class StubGateway:
     async def route(self, capability: str, input_data: dict) -> dict:
         raise NotImplementedError(
-            f"ModelGateway not yet built. "
-            f"Called with capability='{capability}' for gen_id={input_data.get('gen_id')}. "
-            f"Build L5 ModelGateway in gateway slice."
+            f"StubGateway called with capability='{capability}' "
+            f"for gen_id={input_data.get('gen_id')}."
         )
