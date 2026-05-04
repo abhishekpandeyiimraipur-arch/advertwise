@@ -29,7 +29,7 @@ Return ONLY the JSON object. No markdown, no explanation, no backticks."""
 class ModelGateway:
     def __init__(self):
         genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-        self.vision_model = genai.GenerativeModel("gemini-1.5-flash")
+        self.vision_model = genai.GenerativeModel("gemini-2.0-flash")
 
     async def route(self, capability: str, input_data: dict) -> dict:
         if capability == "vision":
