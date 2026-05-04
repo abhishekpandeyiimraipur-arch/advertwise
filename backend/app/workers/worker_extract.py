@@ -132,9 +132,12 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
                         source_url,
                         formats=["markdown"]
                     )
+                    # firecrawl v4 returns Pydantic Document object
+                    metadata = scrape_result.metadata or {}
                     og_image_url = (
-                        scrape_result.get("metadata", {}).get("og:image")
-                        or scrape_result.get("og:image")
+                        getattr(metadata, 'og_image', None)
+                        or getattr(metadata, 'ogImage', None)
+                        or (metadata.get('og:image') if hasattr(metadata, 'get') else None)
                     )
                     if not og_image_url:
                         logger.error(f"phase1_extract: no og:image from Firecrawl for {source_url}")
