@@ -5,7 +5,8 @@ import asyncio
 import logging
 from typing import Optional, Union
 
-from fastapi import APIRouter, Request, Header, UploadFile, Depends
+from fastapi import APIRouter, Request, Header, Depends
+from starlette.datastructures import UploadFile
 
 # Use absolute import as per the project's standard
 from app.infra_gateway import idempotent, AdvertWiseException
@@ -28,8 +29,10 @@ class InputScrubber:
         for val in payload.values():
             if isinstance(val, str):
                 if cls.PROMPT_INJECTION_PATTERN.search(val):
+                    logger.error("ECM002-POINT-1")
                     raise AdvertWiseException(code="ECM-002")
                 if cls.CONTROL_CHAR_PATTERN.search(val):
+                    logger.error("ECM002-POINT-2")
                     raise AdvertWiseException(code="ECM-002")
 
 
@@ -61,13 +64,16 @@ async def create_generation(
         try:
             body = await request.json()
         except Exception:
+            logger.error("ECM002-POINT-3")
             raise AdvertWiseException(code="ECM-002")
             
         if "source_url" not in body:
+            logger.error("ECM002-POINT-4")
             raise AdvertWiseException(code="ECM-002")
             
         source_url = body["source_url"]
         if not isinstance(source_url, str):
+            logger.error("ECM002-POINT-5")
             raise AdvertWiseException(code="ECM-002")
             
         payload_to_scrub = {"source_url": source_url}
@@ -75,15 +81,19 @@ async def create_generation(
     elif "multipart/form-data" in content_type:
         form = await request.form()
         if "source_image" not in form:
+            logger.error("ECM002-POINT-6")
             raise AdvertWiseException(code="ECM-002")
             
         source_image = form["source_image"]
+        logger.error(f"ECM002-DEBUG: source_image type={type(source_image)}, value={repr(source_image)[:100]}")
         if not isinstance(source_image, UploadFile):
+            logger.error("ECM002-POINT-7")
             raise AdvertWiseException(code="ECM-002")
             
         payload_to_scrub = {"filename": source_image.filename or ""}
 
     else:
+        logger.error("ECM002-POINT-8")
         raise AdvertWiseException(code="ECM-002")
 
     # 3. Scrub input BEFORE doing any insertions
@@ -100,7 +110,7 @@ async def create_generation(
         source_image_r2_key = f"{user_id}/{new_gen_id}/source.{ext}"
         
         r2_client = request.app.state.r2_client
-        r2_bucket = os.getenv("R2_BUCKET", "advertwise-uploads")
+        r2_bucket = os.getenv("R2_BUCKET_NAME", "advertwise-dev-assets")
         
         file_bytes = await source_image.read()
         if len(file_bytes) > 10 * 1024 * 1024:

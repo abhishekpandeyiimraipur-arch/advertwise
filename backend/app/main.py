@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
         dsn=os.environ["DATABASE_URL"],
         min_size=2,
         max_size=10,
+        statement_cache_size=0,
     )
     logger.info("Database pool created.")
 
