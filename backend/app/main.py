@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import logging
 import os
@@ -69,6 +71,15 @@ app = FastAPI(
 )
 
 add_exception_handlers(app)
+
+# Dev UI
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(_static_dir, exist_ok=True)
+app.mount("/dev-ui-static", StaticFiles(directory=_static_dir), name="static")
+
+@app.get("/dev-ui")
+async def dev_ui():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "dev_ui.html"))
 
 app.include_router(router)
 app.include_router(generations_router)

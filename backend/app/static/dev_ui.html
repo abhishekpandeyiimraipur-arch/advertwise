@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AdvertWise Dev UI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen p-4">
+<div class="max-w-3xl mx-auto space-y-6">
+
+  <!-- Header -->
+  <div class="border-b border-gray-800 pb-4">
+    <h1 class="text-2xl font-bold text-orange-400">AdvertWise Dev UI</h1>
+    <p class="text-gray-500 text-sm">Backend: <span id="api-base" class="text-green-400"></span></p>
+  </div>
+
+  <!-- SECTION 1: Auth -->
+  <div class="bg-gray-900 rounded-xl p-4 space-y-3">
+    <h2 class="text-lg font-semibold text-orange-300">1. Auth Token</h2>
+    <input id="token-input" type="text" placeholder="Paste JWT token here"
+      class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono text-green-300 focus:outline-none focus:border-orange-500">
+    <button onclick="saveToken()"
+      class="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium">
+      Save Token
+    </button>
+    <p id="token-status" class="text-xs text-gray-500"></p>
+  </div>
+
+  <!-- SECTION 2: Upload -->
+  <div class="bg-gray-900 rounded-xl p-4 space-y-3">
+    <h2 class="text-lg font-semibold text-orange-300">2. Upload Product Image</h2>
+    <input id="file-input" type="file" accept="image/*"
+      class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-600 file:text-white hover:file:bg-orange-500">
+    <button onclick="uploadImage()"
+      class="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+      Upload & Generate
+    </button>
+    <div id="upload-result" class="hidden bg-gray-800 rounded-lg p-3 space-y-2">
+      <p class="text-xs text-gray-400">gen_id:</p>
+      <p id="gen-id-output" class="font-mono text-yellow-300 text-sm break-all cursor-pointer"
+         onclick="copyGenId()"></p>
+      <p class="text-xs text-gray-500">Click to copy and use in Section 3</p>
+    </div>
+  </div>
+
+  <!-- SECTION 3: Inspector -->
+  <div class="bg-gray-900 rounded-xl p-4 space-y-3">
+    <h2 class="text-lg font-semibold text-orange-300">3. Generation Inspector</h2>
+    <div class="flex gap-2">
+      <input id="gen-id-input" type="text" placeholder="Paste gen_id here"
+        class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono text-yellow-300 focus:outline-none focus:border-orange-500">
+      <button onclick="fetchStatus()"
+        class="bg-blue-700 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+        Fetch
+      </button>
+    </div>
+    <div id="auto-refresh-badge" class="hidden">
+      <span class="text-xs text-orange-400 animate-pulse">⟳ Auto-refreshing every 3s...</span>
+    </div>
+    <div id="inspector-result" class="hidden space-y-4">
+      <!-- Status -->
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-gray-400">Status:</span>
+        <span id="status-badge" class="px-3 py-1 rounded-full text-xs font-bold"></span>
+      </div>
+      <!-- Confidence -->
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-gray-400">Confidence:</span>
+        <span id="confidence-val" class="text-white font-mono"></span>
+      </div>
+      <!-- Product Name -->
+      <div>
+        <p class="text-sm text-gray-400 mb-1">Product Name:</p>
+        <p id="product-name" class="text-white font-semibold"></p>
+      </div>
+      <!-- Category -->
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-gray-400">Category:</span>
+        <span id="category-val" class="text-blue-300 font-medium"></span>
+      </div>
+      <!-- Shape -->
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-gray-400">Shape:</span>
+        <span id="shape-val" class="text-purple-300"></span>
+      </div>
+      <!-- Key Features -->
+      <div>
+        <p class="text-sm text-gray-400 mb-1">Key Features:</p>
+        <ul id="features-list" class="list-disc list-inside space-y-1 text-sm text-gray-200"></ul>
+      </div>
+      <!-- Color Palette -->
+      <div>
+        <p class="text-sm text-gray-400 mb-2">Color Palette:</p>
+        <div id="color-palette" class="flex gap-2"></div>
+      </div>
+      <!-- Isolated Image -->
+      <div>
+        <p class="text-sm text-gray-400 mb-2">Isolated Product:</p>
+        <img id="isolated-img" src="" alt="isolated product"
+          class="max-h-48 rounded-lg border border-gray-700 bg-gray-800 hidden">
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 4: SSE -->
+  <div class="bg-gray-900 rounded-xl p-4 space-y-3">
+    <h2 class="text-lg font-semibold text-orange-300">4. Live SSE Stream</h2>
+    <div class="flex gap-2">
+      <input id="sse-gen-id" type="text" placeholder="gen_id for SSE"
+        class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono text-yellow-300 focus:outline-none focus:border-orange-500">
+      <button onclick="connectSSE()"
+        class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+        Connect
+      </button>
+    </div>
+    <div id="sse-log" class="bg-gray-800 rounded-lg p-3 h-32 overflow-y-auto text-xs font-mono text-green-300 space-y-1">
+      <p class="text-gray-600">SSE events will appear here...</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const API = window.location.origin;
+  document.getElementById('api-base').textContent = API;
+
+  // Load saved token
+  window.onload = () => {
+    const t = sessionStorage.getItem('aw_token');
+    if (t) {
+      document.getElementById('token-input').value = t;
+      document.getElementById('token-status').textContent = '✅ Token loaded from session';
+    }
+  };
+
+  function saveToken() {
+    const t = document.getElementById('token-input').value.trim();
+    sessionStorage.setItem('aw_token', t);
+    document.getElementById('token-status').textContent = '✅ Token saved!';
+  }
+
+  function getToken() {
+    return sessionStorage.getItem('aw_token') || '';
+  }
+
+  function getHeaders() {
+    return { 'Authorization': 'Bearer ' + getToken() };
+  }
+
+  async function uploadImage() {
+    const file = document.getElementById('file-input').files[0];
+    if (!file) { alert('Pick an image first'); return; }
+    const key = 'dev-ui-' + Date.now();
+    const fd = new FormData();
+    fd.append('source_image', file);
+    try {
+      const resp = await fetch(API + '/api/generations', {
+        method: 'POST',
+        headers: { ...getHeaders(), 'Idempotency-Key': key },
+        body: fd
+      });
+      const data = await resp.json();
+      if (data.gen_id) {
+        document.getElementById('gen-id-output').textContent = data.gen_id;
+        document.getElementById('upload-result').classList.remove('hidden');
+        document.getElementById('gen-id-input').value = data.gen_id;
+        document.getElementById('sse-gen-id').value = data.gen_id;
+        startAutoRefresh(data.gen_id);
+      } else {
+        alert('Error: ' + JSON.stringify(data));
+      }
+    } catch(e) { alert('Upload failed: ' + e.message); }
+  }
+
+  function copyGenId() {
+    const text = document.getElementById('gen-id-output').textContent;
+    navigator.clipboard.writeText(text);
+    document.getElementById('gen-id-output').textContent = '✅ Copied!';
+    setTimeout(() => document.getElementById('gen-id-output').textContent = text, 1000);
+  }
+
+  let refreshInterval = null;
+
+  function startAutoRefresh(genId) {
+    if (refreshInterval) clearInterval(refreshInterval);
+    document.getElementById('auto-refresh-badge').classList.remove('hidden');
+    refreshInterval = setInterval(async () => {
+      await fetchStatusForId(genId);
+      const status = document.getElementById('status-badge').textContent;
+      if (['brief_ready','failed_category','failed_compliance','failed_safety'].includes(status)) {
+        clearInterval(refreshInterval);
+        document.getElementById('auto-refresh-badge').classList.add('hidden');
+      }
+    }, 3000);
+  }
+
+  async function fetchStatus() {
+    const genId = document.getElementById('gen-id-input').value.trim();
+    if (!genId) { alert('Enter a gen_id'); return; }
+    await fetchStatusForId(genId);
+  }
+
+  async function fetchStatusForId(genId) {
+    try {
+      const resp = await fetch(API + '/api/generations/' + genId, {
+        headers: getHeaders()
+      });
+      const data = await resp.json();
+      renderInspector(data);
+    } catch(e) { console.error('Fetch failed:', e); }
+  }
+
+  function statusColor(s) {
+    const map = {
+      'queued': 'bg-gray-600 text-gray-200',
+      'extracting': 'bg-yellow-700 text-yellow-100',
+      'brief_ready': 'bg-green-700 text-green-100',
+      'failed_category': 'bg-red-700 text-red-100',
+      'failed_compliance': 'bg-red-700 text-red-100',
+      'failed_safety': 'bg-red-700 text-red-100',
+    };
+    return map[s] || 'bg-gray-700 text-gray-200';
+  }
+
+  function renderInspector(data) {
+    document.getElementById('inspector-result').classList.remove('hidden');
+    const s = data.status || '';
+    const badge = document.getElementById('status-badge');
+    badge.textContent = s;
+    badge.className = 'px-3 py-1 rounded-full text-xs font-bold ' + statusColor(s);
+    document.getElementById('confidence-val').textContent = data.confidence_score ?? 'N/A';
+    const brief = data.product_brief || {};
+    document.getElementById('product-name').textContent = brief.product_name || '—';
+    document.getElementById('category-val').textContent = brief.category || '—';
+    document.getElementById('shape-val').textContent = brief.shape || '—';
+    const fl = document.getElementById('features-list');
+    fl.innerHTML = (brief.key_features || []).map(f => '<li>' + f + '</li>').join('');
+    const cp = document.getElementById('color-palette');
+    cp.innerHTML = (brief.color_palette || []).map(c =>
+      '<div class="w-8 h-8 rounded border border-gray-600 flex items-end justify-center" style="background:' + c + '" title="' + c + '"><span class="text-xs hidden group-hover:block">' + c + '</span></div>'
+    ).join('');
+    if (data.isolated_png_url) {
+      const img = document.getElementById('isolated-img');
+      img.src = data.isolated_png_url;
+      img.classList.remove('hidden');
+    }
+  }
+
+  let sseSource = null;
+  function connectSSE() {
+    const genId = document.getElementById('sse-gen-id').value.trim();
+    if (!genId) { alert('Enter gen_id'); return; }
+    if (sseSource) sseSource.close();
+    const log = document.getElementById('sse-log');
+    log.innerHTML = '<p class="text-orange-400">Connecting...</p>';
+    sseSource = new EventSource(API + '/api/sse/' + genId + '?token=' + getToken());
+    sseSource.onmessage = (e) => {
+      const p = document.createElement('p');
+      p.textContent = new Date().toLocaleTimeString() + ' → ' + e.data;
+      log.appendChild(p);
+      log.scrollTop = log.scrollHeight;
+    };
+    sseSource.onerror = () => {
+      const p = document.createElement('p');
+      p.className = 'text-red-400';
+      p.textContent = 'SSE disconnected';
+      log.appendChild(p);
+    };
+  }
+</script>
+</body>
+</html>
