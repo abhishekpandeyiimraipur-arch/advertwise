@@ -125,7 +125,7 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
             try:
                 async with asyncio.timeout(FIRECRAWL_TIMEOUT_SECONDS):
                     from firecrawl import FirecrawlApp
-                    fc = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+                    fc = FirecrawlApp(api_key=os.environ["FIRECRAWLER_API_TOKEN"])
                     # firecrawl-py is sync — run in thread to keep event loop free
                     scrape_result = await asyncio.to_thread(
                         fc.scrape_url, source_url, {"formats": ["extract"]}
@@ -190,7 +190,7 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
             Body=png_bytes,
             ContentType="image/png"
         )
-        r2_base_url = os.environ.get("R2_PUBLIC_BASE_URL", "")
+        r2_base_url = os.environ.get("R2_PUBLIC_URL", "")
         isolated_png_url = f"{r2_base_url}/{r2_key}"
 
         # ── STEP 6: Gemini Vision — product_brief ONLY ────────────────

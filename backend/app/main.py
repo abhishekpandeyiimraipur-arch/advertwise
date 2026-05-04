@@ -1,8 +1,14 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import logging
+import os
+import boto3
+from dotenv import load_dotenv
+from pathlib import Path
 
-# Infra imports (collision-proof)
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env.local")
+
+import asyncpg
 from .infra_redis import RedisManager
 from .infra_gateway import add_exception_handlers
 from .api.routes import router
@@ -12,43 +18,57 @@ from app.routes.generation_advance import router as advance_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Redis Manager (singleton for app lifecycle)
 redis_mgr = RedisManager()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing application lifecycle...")
 
-    # Connect to Redis
-    await redis_mgr.connect()
+    # Database pool
+    app.state.db_pool = await asyncpg.create_pool(
+        dsn=os.environ["DATABASE_URL"],
+        min_size=2,
+        max_size=10,
+    )
+    logger.info("Database pool created.")
 
-    # Inject into app.state (DI contract)
+    # Redis
+    await redis_mgr.connect()
     app.state.redis_db0 = redis_mgr.db0
     app.state.redis_db2 = redis_mgr.db2
     app.state.redis_db5 = redis_mgr.db5
     app.state.redis_mgr = redis_mgr
+    logger.info("Application wiring complete. Redis + DB loaded.")
 
-    logger.info("Application wiring complete. Redis loaded.")
+    app.state.db = app.state.db_pool
+
+    app.state.r2_client = boto3.client(
+        "s3",
+        endpoint_url=os.environ["R2_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+
+    from arq import create_pool as arq_create_pool
+    from arq.connections import RedisSettings
+    app.state.arq_pool = await arq_create_pool(
+        RedisSettings.from_dsn(os.environ["REDIS_URL"])
+    )
 
     yield
 
     logger.info("Tearing down application lifecycle...")
+    await app.state.db_pool.close()
     await redis_mgr.disconnect()
 
-
-# Initialize FastAPI
 app = FastAPI(
-    title="AdvertWise Wiring Proof",
+    title="AdvertWise API",
     lifespan=lifespan
 )
 
-# Register global exception handlers
 add_exception_handlers(app)
 
-# Include API routes
 app.include_router(router)
 app.include_router(generations_router)
 app.include_router(advance_router)
-
-
