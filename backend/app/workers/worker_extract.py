@@ -128,9 +128,9 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
                     fc = FirecrawlApp(api_key=os.environ["FIRECRAWLER_API_TOKEN"])
                     # firecrawl-py is sync — run in thread to keep event loop free
                     scrape_result = await asyncio.to_thread(
-                        fc.scrape_url,
+                        fc.scrape,
                         source_url,
-                        params={"formats": ["markdown"]}
+                        formats=["markdown"]
                     )
                     og_image_url = (
                         scrape_result.get("metadata", {}).get("og:image")
