@@ -38,8 +38,8 @@ async def startup(ctx: dict) -> None:
         region_name="auto",
     )
 
-    from app.gateway import StubGateway
-    ctx["gateway"] = StubGateway()
+    from app.gateway import get_gateway
+    ctx["gateway"] = get_gateway()
 
 
 async def shutdown(ctx: dict) -> None:
