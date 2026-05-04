@@ -90,6 +90,7 @@ async def create_generation(
     InputScrubber.check(payload_to_scrub)
 
     # 4. Process the upload
+    user_id = user.id
     new_gen_id = uuid.uuid4()
     source_image_r2_key: Optional[str] = None
     
@@ -114,7 +115,6 @@ async def create_generation(
 
     # 5. DB Insert
     db = request.app.state.db
-    user_id = user.id
 
     insert_query = """
         INSERT INTO generations (gen_id, user_id, source_url, source_image_url, plan_tier, status)
