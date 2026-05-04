@@ -54,9 +54,8 @@ class ModelGateway:
         image_b64 = input_data["image_b64"]
         
         providers = [
-            ("together_ai", self._call_together_vision),
-            ("gemini",      self._call_gemini_vision),
             ("openai",      self._call_openai_vision),
+            ("gemini",      self._call_gemini_vision),
         ]
         
         last_error = None
