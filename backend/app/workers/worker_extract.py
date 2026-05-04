@@ -186,12 +186,10 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
         _pre_img.save(_buf, format="PNG")
         image_bytes_resized = _buf.getvalue()
 
-        isolated_pil: Image.Image = await asyncio.to_thread(
+        isolated_bytes: bytes = await asyncio.to_thread(
             remove, image_bytes_resized, session=GLOBAL_BG_SESSION
         )
-        # Ensure RGBA (BiRefNet should always return RGBA, but be defensive)
-        if isolated_pil.mode != "RGBA":
-            isolated_pil = isolated_pil.convert("RGBA")
+        isolated_pil: Image.Image = Image.open(io.BytesIO(isolated_bytes)).convert("RGBA")
 
         # ── STEP 5: Upload isolated PNG to R2 ─────────────────────────
         png_buffer = io.BytesIO()
