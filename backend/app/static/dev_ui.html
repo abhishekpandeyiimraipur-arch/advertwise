@@ -230,7 +230,10 @@
     badge.textContent = s;
     badge.className = 'px-3 py-1 rounded-full text-xs font-bold ' + statusColor(s);
     document.getElementById('confidence-val').textContent = data.confidence_score ?? 'N/A';
-    const brief = data.product_brief || {};
+    let brief = data.product_brief || {};
+    if (typeof brief === 'string') {
+      try { brief = JSON.parse(brief); } catch(e) { brief = {}; }
+    }
     document.getElementById('product-name').textContent = brief.product_name || '—';
     document.getElementById('category-val').textContent = brief.category || '—';
     document.getElementById('shape-val').textContent = brief.shape || '—';
