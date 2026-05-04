@@ -69,7 +69,7 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """UPDATE generations
-                   SET status = 'failed_category', error_ecm = $1, updated_at = NOW()
+                   SET status = 'failed_category', error_code = $1, updated_at = NOW()
                    WHERE gen_id = $2""",
                 ecm, gen_id
             )
@@ -83,7 +83,7 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
         # ── STEP 1: Fetch row ──────────────────────────────────────────
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
-                """SELECT gen_id, status, source_url, source_image_r2_key, user_id
+                """SELECT gen_id, status, source_url, source_image_url, user_id
                    FROM generations WHERE gen_id = $1""",
                 gen_id
             )
@@ -118,7 +118,7 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
 
         # ── STEP 3: Acquire image bytes ────────────────────────────────
         source_url         = row["source_url"]
-        source_image_r2_key = row["source_image_r2_key"]
+        source_image_url = row["source_image_url"]
 
         if source_url:
             # Branch A — Firecrawl scrape
@@ -149,17 +149,17 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
                 await _fail("ECM-015")
                 return
 
-        elif source_image_r2_key:
+        elif source_image_url:
             # Branch B — download from R2 (already <10MB, gated at L2)
             r2_obj = await asyncio.to_thread(
                 r2_client.get_object,
                 Bucket=os.environ["R2_BUCKET_NAME"],
-                Key=source_image_r2_key
+                Key=source_image_url
             )
             image_bytes = r2_obj["Body"].read()
 
         else:
-            logger.error(f"phase1_extract: gen_id={gen_id} has neither source_url nor source_image_r2_key")
+            logger.error(f"phase1_extract: gen_id={gen_id} has neither source_url nor source_image_url")
             await _fail("ECM-001")
             return
 
