@@ -96,7 +96,7 @@ async def create_generation(
     if source_image:
         filename = source_image.filename or "image.bin"
         ext = filename.split(".")[-1] if "." in filename else "bin"
-        source_image_r2_key = f"uploads/{new_gen_id}/source.{ext}"
+        source_image_r2_key = f"{user_id}/{new_gen_id}/source.{ext}"
         
         r2_client = request.app.state.r2_client
         r2_bucket = os.getenv("R2_BUCKET", "advertwise-uploads")
@@ -117,8 +117,8 @@ async def create_generation(
     user_id = user.id
 
     insert_query = """
-        INSERT INTO generations (gen_id, user_id, source_url, source_image_r2_key, status)
-        VALUES ($1, $2, $3, $4, 'queued')
+        INSERT INTO generations (gen_id, user_id, source_url, source_image_url, plan_tier, status)
+        VALUES ($1, $2, $3, $4, 'starter', 'queued')
     """
     
     try:
