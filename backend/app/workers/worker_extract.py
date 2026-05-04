@@ -175,8 +175,19 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
             return
 
         # ── STEP 4: BiRefNet background removal ───────────────────────
+        from PIL import Image as PILImage
+        import io
+        _pre_img = PILImage.open(io.BytesIO(image_bytes))
+        _w, _h = _pre_img.size
+        if max(_w, _h) > 1024:
+            _scale = 1024 / max(_w, _h)
+            _pre_img = _pre_img.resize((int(_w * _scale), int(_h * _scale)), PILImage.LANCZOS)
+        _buf = io.BytesIO()
+        _pre_img.save(_buf, format="PNG")
+        image_bytes_resized = _buf.getvalue()
+
         isolated_pil: Image.Image = await asyncio.to_thread(
-            remove, image_bytes, session=GLOBAL_BG_SESSION
+            remove, image_bytes_resized, session=GLOBAL_BG_SESSION
         )
         # Ensure RGBA (BiRefNet should always return RGBA, but be defensive)
         if isolated_pil.mode != "RGBA":
