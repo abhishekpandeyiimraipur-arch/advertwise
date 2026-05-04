@@ -64,3 +64,5 @@ logs/
 backend/test_upload.py
 backend/verify_schema.py
 backend/vs2.py
+
+test_vps.py
