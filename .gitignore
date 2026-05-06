@@ -66,3 +66,5 @@ backend/verify_schema.py
 backend/vs2.py
 
 test_vps.py
+backend/.env.save
+backend/.env

@@ -2,7 +2,7 @@ from arq import cron
 from arq.connections import RedisSettings
 from dotenv import load_dotenv
 from pathlib import Path
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env.local")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 import os
 
 from app.workers.worker_extract import phase1_extract
