@@ -29,6 +29,8 @@ async def startup(ctx: dict) -> None:
     await redis_mgr.connect()
     ctx["redis_db0"] = redis_mgr.db0
     ctx["redis_mgr"] = redis_mgr
+    ctx["redis_db2"] = redis_mgr.db2
+    ctx["redis_db3"] = redis_mgr.db3 if hasattr(redis_mgr, 'db3') else None
 
     # R2 client (boto3 S3-compatible)
     ctx["r2_client"] = boto3.client(
