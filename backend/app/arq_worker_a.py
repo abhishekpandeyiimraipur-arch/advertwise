@@ -6,6 +6,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 import os
 
 from app.workers.worker_extract import phase1_extract
+from app.workers.phase2_chain import phase2_chain
 
 async def startup(ctx: dict) -> None:
     """
@@ -41,6 +42,9 @@ async def startup(ctx: dict) -> None:
     from app.gateway import get_gateway
     ctx["gateway"] = get_gateway()
 
+    from app.services.prompt_catalog import get_prompt_catalog
+    ctx["prompt_catalog"] = get_prompt_catalog()
+
 
 async def shutdown(ctx: dict) -> None:
     """Release resources on graceful shutdown."""
@@ -69,7 +73,7 @@ class WorkerSettings:
     # ADD new workers here as each slice is built — never remove
     functions = [
         phase1_extract,
-        # phase2_chain will be added in Slice C/Phase 2 build
+        phase2_chain,
         # retention_sweep, partition_rotator etc. added in cross-cutting slice
     ]
 
