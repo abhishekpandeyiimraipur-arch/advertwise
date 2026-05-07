@@ -546,7 +546,10 @@ The PRD mandates a strict 5-stage chain on every Co-Pilot Chat turn. This is the
 
 ```
 POST /api/generations/{gen_id}/chat
-Headers: Idempotency-Key, Authorization (JWT) · Body: { message: string (1..500 chars) }
+Headers: Idempotency-Key, Authorization (JWT)
+Body (mutually exclusive — exactly one field per request):
+  Shape A (chip action): { "action": "chip_punchier" | "chip_hinglish" | "chip_diwali" }
+  Shape B (free text):   { "message": string (1..500 chars, ≤20 words) }
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -615,6 +618,41 @@ Headers: Idempotency-Key, Authorization (JWT) · Body: { message: string (1..500
 │                         cost_inr }                                        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Chip Action Bypass (implements BEF gap — MP3-C3)
+
+HD-3 quick-action chips (Punchier / Hinglish / Diwali) are
+system-authored commands, not user-crafted freetext. Running
+them through Stage 1 ComplianceGate injection detection is
+logically incorrect — we would be scanning our own strings.
+
+**Payload dispatch (evaluated at Stage 0, before Stage 1):**
+
+- IF request body contains `"action"` key (Shape A):
+  → Skip Stage 1 entirely. The `action` value is system-authored.
+  → Map `action` → instruction string via the server-side lookup
+    table (defined in `app/api/routes/chat.py`). Pass the instruction
+    string directly into Stage 3 (`WorkerCopy.refine`).
+  → Log `source_type = "chip_action"` in `agent_traces`.
+  → All other stages (0, 2, 3, 4, 5) and all invariants run
+    unchanged. Turn counter, actlock, idempotency cache: unchanged.
+
+- IF request body contains `"message"` key (Shape B):
+  → Full 5-stage chain runs unchanged. No bypass.
+  → Log `source_type = "free_text"` in `agent_traces`.
+
+**Server-side chip action lookup table (frozen for MVP):**
+````
+"chip_punchier" → "Make this script more punchy and direct.
+                   Keep the same framework and product facts."
+"chip_hinglish" → "Rewrite this script in natural Hinglish
+                   (Hindi-English mix). Keep the meaning intact."
+"chip_diwali"   → "Add a Diwali festival context to this script.
+                   Keep the product focus and framework."
+````
+These instruction strings are internal system text. They are NOT
+stored as the user-turn in chat_history. The action code itself
+(e.g. "chip_hinglish") is stored as the user-turn display value.
 
 ### Invariants enforced by the chain
 
@@ -1352,16 +1390,29 @@ export interface GenerationState {
 
 ```python
 from typing import Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    message: str = Field(min_length=1, max_length=500)
+    message: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    action: Optional[Literal[
+        "chip_punchier", "chip_hinglish", "chip_diwali"
+    ]] = None
 
-    @field_validator('message')
+    @model_validator(mode='after')
+    def validate_exactly_one_field(self) -> 'ChatRequest':
+        has_message = self.message is not None
+        has_action  = self.action  is not None
+        if has_message == has_action:  # both or neither
+            raise ValueError(
+                "Exactly one of 'message' or 'action' must be provided."
+            )
+        return self
+
+    @field_validator('message', mode='before')
     @classmethod
-    def validate_word_count(cls, v: str) -> str:
-        if len(v.split()) > 20:
+    def validate_word_count(cls, v):
+        if v is not None and len(str(v).split()) > 20:
             raise ValueError("Chat message must be ≤ 20 words")
         return v
 
@@ -2560,6 +2611,28 @@ async def phase2_chain(ctx, gen_id: str):
     await sse_manager.push(gen_id, {"type": "state_change", "state": "scripts_ready"})
 ```
 
+### Checkpoint Re-entry Rule (implements BEF GAP — MP3-C1)
+
+`phase2_chain` is replay-safe. On every execution, before invoking
+any worker, the job reads the current checkpoint state:
+
+```python
+checkpoint = await db.fetchrow(
+    """SELECT routed_frameworks, raw_scripts, critic_scores, safe_scripts
+       FROM generations WHERE gen_id = $1""",
+    gen_id
+)
+```
+
+Stage skip rules (evaluated in this order before any worker runs):
+
+- `routed_frameworks IS NOT NULL` → skip `WorkerCopy.framework_router`. Use the existing value; proceed directly to `generate_per_framework`.
+- `raw_scripts IS NOT NULL` → skip `WorkerCopy.generate_per_framework`. Reconstruct `scripts` from the stored JSON; proceed to `WorkerCritic`.
+- `critic_scores IS NOT NULL` → skip `WorkerCritic`. Reconstruct `critic_result` from stored scores; proceed to `WorkerSafety`.
+- `safe_scripts IS NOT NULL` → job is a duplicate execution. Verify `status == 'scripts_ready'` and return early (idempotent success — no writes, no SSE push).
+
+Re-entry reads only. It never resets, overwrites, or NULLs any checkpoint column. Stage skip does not bypass the FSM — state-guarded UPDATEs in the non-skipped stages still enforce the `WHERE status=` precondition. This prevents double-billing of LLM COGS on retry and ensures `CostGuard.pre_check` in the `/chat` chain reflects actual spend, not projected re-spend.
+
 ### [TDD-WORKERS]-E · Worker-CRITIC
 
 **Fulfills PRD Requirement:** `[PRD-AGENTIC-DRAFT]`, `[PRD-PIPELINE]` (Phase 2), `[PRD-HD3]` CRITIC scores all 3 framework-tagged scripts. It does **no filtering**; it orders by score with tie-break by framework angle (conversion > emotion > logic). 
@@ -2907,8 +2980,16 @@ class WorkerStrategist:
 
             "b_roll_plan": b_roll_plan,
 
+            "b_roll_available": len(b_roll_plan) > 0,
+
         }
 ```
+
+### Cold-Start Style Defaults + b_roll_available (implements BEF GAP-12)
+
+**`b_roll_available` field:** Added to the `strategy_card` JSONB payload returned by `WorkerStrategist.process()`. Value is `True` when `b_roll_plan` contains ≥ 1 clip; `False` when empty. HD-5 reads this field from the hydrated `strategy_card` to decide whether to show or hide the "B-roll" stage row in the render progress UI. Worker-COMPOSE behavior is not affected — it already handles an empty `b_roll_plan` gracefully per the BRollPlanner invariants in `[TDD-WORKERS]-C2`.
+
+**Cold-start style defaults:** When `user_style_profiles` returns zero rows for the current `user_id` (new user, no style memory), `WorkerStrategist` uses the `COLD_START_DEFAULTS` constant defined in `app/workers/strategist.py` to populate `motion_archetype_id` and `environment_preset_id`. The constant is defined per BEF GAP-12 resolution. Lookup: `COLD_START_DEFAULTS.get(category, DEFAULT_FALLBACK)`. This constant is consulted only when pgvector returns zero rows. As soon as a user completes their first generation, the style memory upsert in Worker-EXPORT fires and `COLD_START_DEFAULTS` is never used again for that user.
 
 ### [TDD-WORKERS]-H · Worker-TTS, I2V, REFLECT, COMPOSE
 
