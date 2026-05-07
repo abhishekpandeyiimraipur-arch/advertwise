@@ -218,13 +218,14 @@ async def phase1_extract(ctx: dict, *, gen_id: str) -> None:
         )
 
         # vision_result must contain these keys. If gateway raises, outer try/except handles.
+        vision_data = json.loads(vision_result.text)
         product_brief = {
-            "product_name":  vision_result["product_name"],
-            "category":      str(vision_result["category"]).lower().strip(),
-            "price_inr":     vision_result.get("price_inr"),
-            "key_features":  vision_result.get("key_features", []),
-            "color_palette": vision_result.get("color_palette", []),
-            "shape":         str(vision_result.get("shape", "irregular")).lower().strip(),
+            "product_name":  vision_data["product_name"],
+            "category":      str(vision_data["category"]).lower().strip(),
+            "price_inr":     vision_data.get("price_inr"),
+            "key_features":  vision_data.get("key_features", []),
+            "color_palette": vision_data.get("color_palette", []),
+            "shape":         str(vision_data.get("shape", "irregular")).lower().strip(),
         }
 
         # ── STEP 7: Confidence score (GAP-10, deterministic) ──────────
