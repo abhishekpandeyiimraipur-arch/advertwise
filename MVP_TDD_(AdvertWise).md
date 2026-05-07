@@ -1519,6 +1519,82 @@ class StrategyCardOutput(BaseModel):
 ```
 
 ---
+### [TDD-TYPES]-P1 · app/types/script.py — Script dataclass (Python)
+
+Canonical Python Script type. Used by WorkerCopy (creates),
+WorkerCritic (scores), WorkerSafety (filters), phase2_chain
+(persists), and the /chat route (refines). Created in commit
+8bd2a56. Never redefine inside a worker file.
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Script:
+    # LLM-generated structural fields (set by WorkerCopy)
+    hook: str              # Opening line — HD-3 tile headline
+    body: str              # Middle section — product proof/story
+    cta: str               # Call-to-action — HD-3 tile footer
+    full_text: str         # Complete script (hook + body + cta)
+    word_count: int        # LLM-computed total word count
+    language_mix: str      # 'pure_hindi'|'hinglish'|'pure_english'
+    # Framework metadata (set by WorkerCopy)
+    framework: str         # AdFramework enum value as string
+    framework_angle: str   # 'logic'|'emotion'|'conversion'
+    framework_rationale: str
+    evidence_note: str
+    suggested_tone: str    # Tone guidance for TTS worker
+    # Scoring fields (set by WorkerCritic, default empty)
+    critic_score: int = 0
+    critic_rationale: str = ""
+```
+
+Import path: `from app.types.script import Script`
+
+### [TDD-TYPES]-P2 · app/types/frameworks.py — FRAMEWORK_ANGLE_MAP + SAFE_TRIO
+
+```python
+from app.schemas.enums import AdFramework
+
+FRAMEWORK_ANGLE_MAP: dict[AdFramework, str] = {
+    AdFramework.PAS_MICRO:              "emotion",
+    AdFramework.USAGE_RITUAL:           "emotion",
+    AdFramework.ASMR_TRIGGER:           "emotion",
+    AdFramework.HYPER_LOCAL_COMFORT:    "emotion",
+    AdFramework.PREMIUM_UPGRADE:        "emotion",
+    AdFramework.CLINICAL_FLEX:          "logic",
+    AdFramework.MYTH_BUSTER:            "logic",
+    AdFramework.SPEC_DROP_FLEX:         "logic",
+    AdFramework.ROI_DURABILITY_FLEX:    "logic",
+    AdFramework.FESTIVAL_OCCASION_HOOK: "conversion",
+    AdFramework.SCARCITY_DROP:          "conversion",
+    AdFramework.SOCIAL_PROOF:           "conversion",
+}
+
+SAFE_TRIO: list[AdFramework] = [
+    AdFramework.PAS_MICRO,               # emotion
+    AdFramework.CLINICAL_FLEX,           # logic
+    AdFramework.FESTIVAL_OCCASION_HOOK,  # conversion
+]
+```
+
+Import path: `from app.types.frameworks import SAFE_TRIO, FRAMEWORK_ANGLE_MAP`
+
+### [TDD-TYPES]-P3 · app/core/exceptions.py — Shared Exceptions
+
+```python
+class ProviderUnavailableError(Exception):
+    """Raised when a provider call fails after all retries.
+    Caught by phase2_chain to trigger SAFE_TRIO fallback.
+    ECM wrapping happens at the route handler level, not here.
+    Never import from infra_gateway or any worker.
+    """
+    pass
+```
+
+Import path: `from app.core.exceptions import ProviderUnavailableError`
+
+---
 
 ## [TDD-MIGRATIONS] · Data Migrations (v19 → v20 → v3 schema)
 
@@ -2151,13 +2227,15 @@ class WorkerExtract:
         
         confidence = self._compute_confidence(isolated_pil)
         
+        # gateway.route() returns GatewayResponse — parse .text to dict
+        vision_data = json.loads(vision_result.text)
         product_brief = {
-            "product_name": vision_result["product_name"],
-            "category": vision_result["category"],
-            "price_inr": vision_result.get("price_inr"),
-            "key_features": vision_result["key_features"],
-            "color_palette": vision_result["color_palette"],
-            "shape": vision_result["shape"],
+            "product_name":  vision_data["product_name"],
+            "category":      str(vision_data["category"]).lower().strip(),
+            "price_inr":     vision_data.get("price_inr"),
+            "key_features":  vision_data.get("key_features", []),
+            "color_palette": vision_data.get("color_palette", []),
+            "shape":         str(vision_data.get("shape", "irregular")).lower().strip(),
         }
 
         if product_brief["category"] not in GREEN_ZONE_SET:
@@ -4641,6 +4719,58 @@ class ModelGateway:
         
         # Return just the ordered strings
         return [p for p, _, _ in scored]
+```
+
+### GatewayResponse — Uniform Response Contract (MP3-GATEWAY)
+
+All `gateway.route()` calls return a `GatewayResponse` dataclass
+defined in `app/gateway/__init__.py`:
+
+```python
+from dataclasses import dataclass
+from decimal import Decimal
+
+@dataclass
+class GatewayResponse:
+    text: str = ""
+    cost_inr: Decimal = Decimal("0.00")
+    model_used: str = ""
+    tokens_in: int = 0
+    tokens_out: int = 0
+    latency_ms: int = 0
+    audio_bytes: bytes = None   # TTS capability (MP4)
+    video_url: str = None       # I2V capability (MP4)
+    embedding: list = None      # Embedding capability (MP5)
+```
+
+**Callers always use `response.text`** for LLM and moderation output.
+Vision callers use `json.loads(response.text)` to get the dict.
+
+**Live capabilities as of commit 8bd2a56:**
+
+| Capability | Status | Primary | Fallback |
+|---|---|---|---|
+| `vision` | Live (MP2) | OpenAI GPT-4o-mini | Gemini 2.0 Flash |
+| `llm` | Live (MP3) | DeepSeek V3 | Groq Llama 3.3 → Together Llama 3.3 |
+| `moderation` | Live (MP3) | Together Llama Guard 3 | Groq Llama Guard 3 |
+| `tts` | Stub (MP4) | Sarvam / ElevenLabs | — |
+| `i2v` | Stub (MP4) | Fal.ai | MiniMax |
+| `embedding` | Stub (MP5) | OpenAI text-embedding | — |
+
+**Health-aware routing:** Gateway reads `health:{capability}:{provider}`
+from Redis DB3. Providers with health < 20 skipped when alternatives
+exist. Success: +10 (cap 100). Failure: -30 (floor 0). Default: 70.
+
+**Cost tracking constants** (in `app/gateway/__init__.py`):
+
+```python
+COST_RATES: dict[str, tuple] = {
+    "deepseek-v3":            (Decimal("0.022"), Decimal("0.090")),
+    "groq-llama-3.3-70b":     (Decimal("0.000"), Decimal("0.000")),
+    "together-llama-3.3":     (Decimal("0.018"), Decimal("0.060")),
+    "together-llama-guard-3": (Decimal("0.010"), Decimal("0.010")),
+    "groq-llama-guard-3":     (Decimal("0.000"), Decimal("0.000")),
+}
 ```
 
 ### [TDD-GATEWAY]-B · CostGuard · Per-Gen COGS Ledger
