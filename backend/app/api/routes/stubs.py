@@ -4,7 +4,8 @@ import logging
 
 # Standardized Infrastructure Imports
 # We use 'app.infra_gateway' to bypass the folder shadowing issue
-from app.infra_gateway import idempotent, AdvertWiseException, ECMCode
+from app.api.dependencies import idempotent
+from app.infra_gateway import AdvertWiseException, ECMCode
 from app.guards.compliance_gate import ComplianceGate
 from app.guards.cost_guard import CostGuard
 
