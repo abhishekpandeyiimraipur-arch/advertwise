@@ -6,8 +6,8 @@ import logging
 # We use 'app.infra_gateway' to bypass the folder shadowing issue
 from app.api.dependencies import idempotent
 from app.infra_gateway import AdvertWiseException, ECMCode
-from app.guards.compliance_gate import ComplianceGate
-from app.guards.cost_guard import CostGuard
+from app.services.compliance_gate import ComplianceGate
+from app.services.cost_guard import CostGuard
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
