@@ -21,6 +21,7 @@ from app.api.routes.generations import router as generations_router
 from app.api.routes.advance import router as advance_router
 from app.api.routes.regenerate import router as regenerate_router
 from app.api.routes.edit_back import router as edit_back_router
+from app.api.routes.approve_strategy import router as approve_strategy_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -91,3 +92,4 @@ app.include_router(generations_router)
 app.include_router(advance_router)
 app.include_router(regenerate_router)
 app.include_router(edit_back_router)
+app.include_router(approve_strategy_router)
