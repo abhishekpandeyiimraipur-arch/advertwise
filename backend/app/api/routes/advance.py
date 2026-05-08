@@ -371,11 +371,11 @@ async def advance_generation(
                 logger.error("strategist_failed", extra={"gen_id": gen_id, "error": str(e)})
                 raise HTTPException(503, detail={"error_code": "ECM-013"})
 
-            # STEP 4: Final state UPDATE → strategy_ready
+            # STEP 4: Final state UPDATE → strategy_preview
             try:
                 await db_pool.execute(
                     """UPDATE generations
-                       SET status = 'strategy_ready',
+                       SET status = 'strategy_preview',
                            strategy_card = $2::jsonb,
                            updated_at = NOW()
                        WHERE gen_id = $1""",
@@ -388,14 +388,14 @@ async def advance_generation(
             # STEP 5: SSE push
             await redis_db0.lpush(
                 f"sse:{gen_id}",
-                json.dumps({"type": "state_change", "status": "strategy_ready"})
+                json.dumps({"type": "state_change", "status": "strategy_preview"})
             )
             await redis_db0.expire(f"sse:{gen_id}", 300)
 
             # STEP 6: Return
             return {
                 "gen_id": gen_id,
-                "status": "strategy_ready",
+                "status": "strategy_preview",
                 "strategy_card": strategy_card,
             }
 
