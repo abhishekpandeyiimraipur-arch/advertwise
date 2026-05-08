@@ -55,3 +55,13 @@ def idempotent(ttl: int = 300, action_key: str = "default", cache_only_2xx: bool
 
         return wrapper
     return decorator
+
+# Re-export auth dependencies for unified import path
+from app.auth import get_current_user
+
+# DB pool dependency
+from fastapi import Request
+
+async def get_db(request: Request):
+    return getattr(request.app.state, "db_pool",
+                   getattr(request.app.state, "db", None))
