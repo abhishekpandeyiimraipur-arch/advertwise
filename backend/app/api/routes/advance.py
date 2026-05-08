@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user
+from app.workers.strategist import WorkerStrategist
 
 logger = logging.getLogger(__name__)
 
@@ -204,141 +205,204 @@ async def advance_generation(
     redis_db0 = redis_mgr.db0
     redis_db5 = redis_mgr.db5   # actlock lives on DB5
 
-    # ── STEP 1: actlock fence (double-click defense) ──────────────────
-    # Prevents same user clicking advance twice simultaneously
-    lock_key = f"actlock:{gen_id}:advance_brief_ready"
-    acquired = await redis_db5.set(lock_key, "1", nx=True, ex=10)
-    if not acquired:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "request already in progress", "error_code": "ECM-012"}
+    # ── Fetch and validate row ────────────────────────────
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT gen_id, status, confidence_score,
+                      product_brief, user_id
+               FROM generations
+               WHERE gen_id = $1 AND user_id = $2""",
+            uuid.UUID(gen_id), user_id
         )
 
-    try:
-        # ── STEP 2: Fetch and validate row ────────────────────────────
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """SELECT gen_id, status, confidence_score,
-                          product_brief, user_id
-                   FROM generations
-                   WHERE gen_id = $1 AND user_id = $2""",
-                uuid.UUID(gen_id), user_id
-            )
+    if not row:
+        raise HTTPException(status_code=404, detail="Generation not found")
 
-        if not row:
-            raise HTTPException(status_code=404, detail="Generation not found")
-
-        if row["status"] != "brief_ready":
+    if row["status"] == "brief_ready":
+        # ── Transition 1 (existing, unchanged) ──
+        # ── STEP 1: actlock fence (double-click defense) ──────────────────
+        # Prevents same user clicking advance twice simultaneously
+        lock_key = f"actlock:{gen_id}:advance_brief_ready"
+        acquired = await redis_db5.set(lock_key, "1", nx=True, ex=10)
+        if not acquired:
             raise HTTPException(
                 status_code=409,
-                detail={
-                    "error": "generation not in brief_ready state",
-                    "current_status": row["status"]
-                }
+                detail={"error": "request already in progress", "error_code": "ECM-012"}
             )
 
-        # ── STEP 3: Director tips (static DB read, ZERO LLM) ─────────
-        director_tips = []
         try:
-            category = None
-            if row["product_brief"]:
-                brief = row["product_brief"]
-                if isinstance(brief, str):
-                    import json
-                    brief = json.loads(brief)
-                category = brief.get("category")
-
-            confidence = float(row["confidence_score"]) if row["confidence_score"] else 0.0
-
-            if category:
-                async with db_pool.acquire() as conn:
-                    tips = await conn.fetch(
-                        """SELECT tip_type, copy_en, copy_hi
-                           FROM director_tips
-                           WHERE category = $1
-                             AND is_active = TRUE
-                             AND min_confidence <= $2
-                           ORDER BY tip_type""",
-                        category, confidence
-                    )
-                director_tips = [dict(t) for t in tips]
-        except Exception as e:
-            # Silent degradation — tips table may not exist yet
-            import logging
-            logging.getLogger(__name__).warning(f"director_tips fetch failed: {e}")
+            # ── STEP 3: Director tips (static DB read, ZERO LLM) ─────────
             director_tips = []
+            try:
+                category = None
+                if row["product_brief"]:
+                    brief = row["product_brief"]
+                    if isinstance(brief, str):
+                        import json
+                        brief = json.loads(brief)
+                    category = brief.get("category")
 
-        # ── STEP 4: State-guarded UPDATE (optimistic concurrency) ─────
-        # WHERE status = 'brief_ready' ensures no double-transition
-        async with db_pool.acquire() as conn:
-            result = await conn.execute(
+                confidence = float(row["confidence_score"]) if row["confidence_score"] else 0.0
+
+                if category:
+                    async with db_pool.acquire() as conn:
+                        tips = await conn.fetch(
+                            """SELECT tip_type, copy_en, copy_hi
+                               FROM director_tips
+                               WHERE category = $1
+                                 AND is_active = TRUE
+                                 AND min_confidence <= $2
+                               ORDER BY tip_type""",
+                            category, confidence
+                        )
+                    director_tips = [dict(t) for t in tips]
+            except Exception as e:
+                # Silent degradation — tips table may not exist yet
+                import logging
+                logging.getLogger(__name__).warning(f"director_tips fetch failed: {e}")
+                director_tips = []
+
+            # ── STEP 4: State-guarded UPDATE (optimistic concurrency) ─────
+            # WHERE status = 'brief_ready' ensures no double-transition
+            async with db_pool.acquire() as conn:
+                result = await conn.execute(
+                    """UPDATE generations
+                       SET status = 'scripting', updated_at = NOW()
+                       WHERE gen_id = $1 AND status = 'brief_ready'""",
+                    uuid.UUID(gen_id)
+                )
+
+            if result == "UPDATE 0":
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "concurrent state change detected"}
+                )
+
+            # ── STEP 5: ARQ enqueue phase2_chain ─────────────────────────
+            # phase2_chain not yet implemented — enqueue by name string.
+            # ARQ will hold it in queue until the function is registered.
+            try:
+                import os
+                from arq import create_pool
+                from arq.connections import RedisSettings
+                arq_redis = await create_pool(
+                    RedisSettings.from_dsn(
+                        os.environ.get("REDIS_URL", "redis://localhost:6379/1")
+                    )
+                )
+                await arq_redis.enqueue_job(
+                    "phase2_chain",
+                    gen_id=gen_id,
+                    _queue_name="phase1_to_3_workers",
+                )
+                await arq_redis.aclose()
+            except Exception as e:
+                # Log but do not fail the request — state is already scripting
+                # Phase 2 can be manually re-triggered if needed
+                import logging
+                logging.getLogger(__name__).error(
+                    f"advance: ARQ enqueue failed for gen_id={gen_id}: {e}"
+                )
+
+            # ── STEP 6: SSE push ──────────────────────────────────────────
+            import json
+            sse_key = f"sse:{gen_id}"
+            await redis_db0.lpush(
+                sse_key,
+                json.dumps({"type": "state_change", "status": "scripting"})
+            )
+            await redis_db0.expire(sse_key, 300)
+
+            # ── STEP 7: Compute confidence band for response ──────────────
+            score = float(row["confidence_score"]) if row["confidence_score"] else None
+            if score is None:
+                band = "unknown"
+            elif score >= 0.90:
+                band = "green"
+            elif score >= 0.85:
+                band = "yellow"
+            else:
+                band = "red"
+
+            return {
+                "gen_id": gen_id,
+                "status": "scripting",
+                "confidence_band": band,
+                "director_tips": director_tips,
+            }
+
+        finally:
+            # ALWAYS release the actlock, even if something raised above
+            await redis_db5.delete(lock_key)
+
+    elif row["status"] == "scripts_ready":
+        # ── Transition 2 (new) ──
+        lock_key = f"actlock:{gen_id}:advance_scripts_ready"
+        acquired = await redis_db5.set(lock_key, "1", nx=True, ex=30)
+        if not acquired:
+            raise HTTPException(409, detail={"error_code": "ECM-012"})
+
+        try:
+            # STEP 2: State-guarded UPDATE
+            result = await db_pool.execute(
                 """UPDATE generations
-                   SET status = 'scripting', updated_at = NOW()
-                   WHERE gen_id = $1 AND status = 'brief_ready'""",
+                   SET status = 'strategy_pending', updated_at = NOW()
+                   WHERE gen_id = $1 AND status = 'scripts_ready'""",
                 uuid.UUID(gen_id)
             )
+            if result == "UPDATE 0":
+                raise HTTPException(409, detail={"error_code": "ECM-012"})
 
-        if result == "UPDATE 0":
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "concurrent state change detected"}
-            )
-
-        # ── STEP 5: ARQ enqueue phase2_chain ─────────────────────────
-        # phase2_chain not yet implemented — enqueue by name string.
-        # ARQ will hold it in queue until the function is registered.
-        try:
-            import os
-            from arq import create_pool
-            from arq.connections import RedisSettings
-            arq_redis = await create_pool(
-                RedisSettings.from_dsn(
-                    os.environ.get("REDIS_URL", "redis://localhost:6379/1")
+            # STEP 3: Call Worker-STRATEGIST in-process
+            strategist = WorkerStrategist()
+            try:
+                strategy_card = await strategist.run(
+                    gen_id=gen_id,
+                    db=db_pool,
                 )
+            except Exception as e:
+                # Rollback state so user can retry
+                await db_pool.execute(
+                    """UPDATE generations
+                       SET status = 'scripts_ready', updated_at = NOW()
+                       WHERE gen_id = $1""",
+                    uuid.UUID(gen_id)
+                )
+                logger.error("strategist_failed", extra={"gen_id": gen_id, "error": str(e)})
+                raise HTTPException(503, detail={"error_code": "ECM-013"})
+
+            # STEP 4: Final state UPDATE → strategy_ready
+            try:
+                await db_pool.execute(
+                    """UPDATE generations
+                       SET status = 'strategy_ready',
+                           strategy_card = $2::jsonb,
+                           updated_at = NOW()
+                       WHERE gen_id = $1""",
+                    uuid.UUID(gen_id),
+                    json.dumps(strategy_card),
+                )
+            except Exception as e:
+                logger.error("strategy_card update failed", extra={"gen_id": gen_id, "error": str(e)})
+
+            # STEP 5: SSE push
+            await redis_db0.lpush(
+                f"sse:{gen_id}",
+                json.dumps({"type": "state_change", "status": "strategy_ready"})
             )
-            await arq_redis.enqueue_job(
-                "phase2_chain",
-                gen_id=gen_id,
-                _queue_name="phase1_to_3_workers",
-            )
-            await arq_redis.aclose()
-        except Exception as e:
-            # Log but do not fail the request — state is already scripting
-            # Phase 2 can be manually re-triggered if needed
-            import logging
-            logging.getLogger(__name__).error(
-                f"advance: ARQ enqueue failed for gen_id={gen_id}: {e}"
-            )
+            await redis_db0.expire(f"sse:{gen_id}", 300)
 
-        # ── STEP 6: SSE push ──────────────────────────────────────────
-        import json
-        sse_key = f"sse:{gen_id}"
-        await redis_db0.lpush(
-            sse_key,
-            json.dumps({"type": "state_change", "status": "scripting"})
-        )
-        await redis_db0.expire(sse_key, 300)
+            # STEP 6: Return
+            return {
+                "gen_id": gen_id,
+                "status": "strategy_ready",
+                "strategy_card": strategy_card,
+            }
 
-        # ── STEP 7: Compute confidence band for response ──────────────
-        score = float(row["confidence_score"]) if row["confidence_score"] else None
-        if score is None:
-            band = "unknown"
-        elif score >= 0.90:
-            band = "green"
-        elif score >= 0.85:
-            band = "yellow"
-        else:
-            band = "red"
+        finally:
+            await redis_db5.delete(lock_key)
 
-        return {
-            "gen_id": gen_id,
-            "status": "scripting",
-            "confidence_band": band,
-            "director_tips": director_tips,
-        }
-
-    finally:
-        # ALWAYS release the actlock, even if something raised above
-        await redis_db5.delete(lock_key)
+    else:
+        raise HTTPException(409, detail={"error_code": "ECM-012"})
 
 # -------------------------------------------------------------------------
