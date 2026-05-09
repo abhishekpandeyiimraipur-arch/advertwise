@@ -92,6 +92,10 @@ app.mount("/dev-ui-static", StaticFiles(directory=_static_dir), name="static")
 async def dev_ui():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "dev_ui.html"))
 
+@app.get("/dev-ui-phase4")
+async def dev_ui_phase4():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "test_phase4.html"))
+
 app.include_router(router)
 app.include_router(generations_router)
 app.include_router(advance_router)

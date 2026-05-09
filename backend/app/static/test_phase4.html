@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AdvertWise — Phase 4 Pipeline Tester</title>
+  <meta name="description" content="Developer test page for AdvertWise Phase 4 pipeline: coordinator, declaration, retry-export, SSE stream." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0f0f0f;
+      color: #e0e0e0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      margin-bottom: 28px;
+      border-bottom: 1px solid #2a2a2a;
+      padding-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #f0f0f0;
+      letter-spacing: -0.3px;
+    }
+    .header h1 span { color: #6366f1; }
+    .header .subtitle {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #666;
+      font-family: 'Courier New', monospace;
+    }
+    .header .subtitle strong { color: #888; }
+
+    /* ── CARDS ── */
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2c2c2c;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6366f1;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      border-bottom: 1px solid #2c2c2c;
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+    }
+
+    /* ── INPUTS ── */
+    .config-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .field label {
+      font-size: 11px;
+      color: #888;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .field.wide { flex: 1 1 200px; }
+    .field.medium { flex: 0 0 180px; }
+    .field.stretch { flex: 1 1 260px; }
+
+    input[type="text"], input[type="password"] {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #f0f0f0;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      border-color: #6366f1;
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      padding: 9px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: #4f46e5; }
+    .btn:active { transform: scale(0.97); }
+    .btn.secondary {
+      background: #2d2d2d;
+      border: 1px solid #444;
+      color: #ccc;
+    }
+    .btn.secondary:hover { background: #383838; }
+    .btn.danger {
+      background: #7f1d1d;
+      border: 1px solid #991b1b;
+    }
+    .btn.danger:hover { background: #991b1b; }
+    .btn.sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .btn-row.top { margin-top: 0; }
+
+    /* ── STATUS CARD ── */
+    #statusCard { display: none; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 16px;
+      align-items: center;
+    }
+    .status-label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .status-value {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #ccc;
+    }
+
+    /* badges */
+    .badge {
+      display: inline-block;
+      padding: 3px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-orange  { background: #78350f; color: #fbbf24; border: 1px solid #92400e; }
+    .badge-blue    { background: #1e3a5f; color: #60a5fa; border: 1px solid #2563eb; }
+    .badge-pulse   { animation: pulse 1.4s ease-in-out infinite; }
+    .badge-green   { background: #14532d; color: #4ade80; border: 1px solid #166534; }
+    .badge-bright  { background: #052e16; color: #22c55e; border: 1px solid #16a34a; box-shadow: 0 0 6px #22c55e44; }
+    .badge-purple  { background: #3b0764; color: #c084fc; border: 1px solid #7e22ce; }
+    .badge-red     { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    .badge-gray    { background: #262626; color: #a1a1aa; border: 1px solid #3f3f46; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.5; }
+    }
+
+    .thumb-wrap { margin-top: 10px; }
+    .thumb-wrap img {
+      max-width: 120px;
+      max-height: 120px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      display: block;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .thumb-wrap img:hover { transform: scale(1.04); }
+
+    .preview-link {
+      color: #6366f1;
+      text-decoration: none;
+      font-size: 12px;
+    }
+    .preview-link:hover { text-decoration: underline; }
+
+    /* ── CONTROLS ── */
+    .pipeline-section {
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .pipeline-section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
+    }
+    .note {
+      font-size: 11px;
+      color: #555;
+      margin-top: 8px;
+      font-style: italic;
+    }
+
+    .checkbox-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .checkbox-item input[type="checkbox"] {
+      width: 15px;
+      height: 15px;
+      accent-color: #6366f1;
+      cursor: pointer;
+    }
+    .checkbox-item span {
+      font-size: 13px;
+      color: #ccc;
+    }
+
+    /* ── LOG BOXES ── */
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .log-box {
+      background: #0a0a0a;
+      color: #22c55e;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      padding: 12px;
+      overflow-y: scroll;
+      white-space: pre-wrap;
+      border: 1px solid #1f1f1f;
+      border-radius: 6px;
+      line-height: 1.5;
+    }
+    #sseLog  { height: 300px; }
+    #apiLog  { height: 400px; color: #a3e635; }
+
+    .sse-controls {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 4px;
+    }
+    .dot-green { background: #22c55e; box-shadow: 0 0 5px #22c55e; animation: pulse 1s infinite; }
+    .dot-gray  { background: #555; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1><span>AdvertWise</span> — Phase 4 Pipeline Tester</h1>
+    <div class="subtitle">
+      <strong>Branch:</strong> mp4-phase4-workers &nbsp;|&nbsp;
+      <strong>VPS:</strong> 89.167.27.232
+    </div>
+  </div>
+
+  <!-- CONFIG BOX -->
+  <div class="card">
+    <div class="section-title">Configuration</div>
+    <div class="config-row">
+      <div class="field wide">
+        <label for="genId">Gen ID</label>
+        <input type="text" id="genId" placeholder="e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6" />
+      </div>
+      <div class="field medium">
+        <label for="token">Auth Token</label>
+        <input type="password" id="token" placeholder="Bearer token" />
+      </div>
+      <div class="field stretch">
+        <label for="baseUrl">API Base URL</label>
+        <input type="text" id="baseUrl" value="http://89.167.27.232:8000" />
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="loadGeneration()" id="loadBtn">Load Generation</button>
+    </div>
+  </div>
+
+  <!-- STATUS CARD -->
+  <div class="card" id="statusCard">
+    <div class="section-title">Generation Status</div>
+    <div class="status-grid" id="statusGrid">
+      <span class="status-label">Gen ID</span>
+      <span class="status-value" id="displayGenId">—</span>
+      <span class="status-label">Status</span>
+      <span id="statusBadge"><span class="badge badge-gray">—</span></span>
+      <span class="status-label">B-Roll Clips</span>
+      <span class="status-value" id="bRollCount">—</span>
+      <span class="status-label">Preview URL</span>
+      <span class="status-value" id="previewUrlCell">—</span>
+    </div>
+    <div class="thumb-wrap" id="thumbWrap" style="display:none;">
+      <span class="status-label" style="display:block;margin-bottom:6px;">Isolated PNG</span>
+      <img id="pngThumb" src="" alt="Isolated PNG" onclick="window.open(this.src,'_blank')" />
+    </div>
+  </div>
+
+  <!-- PIPELINE CONTROLS -->
+  <div class="card">
+    <div class="section-title">Pipeline Controls</div>
+
+    <!-- Section A: Coordinator -->
+    <div class="pipeline-section">
+      <div class="pipeline-section-title">A — Coordinator</div>
+      <button class="btn" onclick="enqueueCoordinator()" id="coordBtn">🚀 Enqueue Phase4 Coordinator</button>
+      <div class="note">Calls POST /api/generations/{genId}/approve-strategy — Status must be <code>strategy_preview</code> → <code>funds_locked</code></div>
+    </div>
+
+    <!-- Section B: Declaration -->
+    <div class="pipeline-section">
+      <div class="pipeline-section-title">B — Declaration</div>
+      <div class="checkbox-list">
+        <label class="checkbox-item">
+          <input type="checkbox" id="check1" />
+          <span>I confirm this is for commercial advertising purposes</span>
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" id="check2" />
+          <span>I have rights to use this product image</span>
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" id="check3" />
+          <span>I understand this is AI-generated per IT Rules 2026</span>
+        </label>
+      </div>
+      <button class="btn" onclick="submitDeclaration()" id="declBtn">✅ Submit Declaration</button>
+      <div class="note">Calls POST /api/generations/{genId}/declaration — Status must be <code>preview_ready</code></div>
+    </div>
+
+    <!-- Section C: Retry Export -->
+    <div class="pipeline-section">
+      <div class="pipeline-section-title">C — Retry Export</div>
+      <label class="checkbox-item" style="margin-bottom:10px;">
+        <input type="checkbox" id="resignCheck" />
+        <span>Re-sign declaration <span style="color:#666;">(for stale declarations &gt;24h)</span></span>
+      </label>
+      <button class="btn secondary" onclick="retryExport()" id="retryBtn">🔄 Retry Export</button>
+      <div class="note">Calls POST /api/generations/{genId}/retry-export</div>
+    </div>
+
+    <!-- Section D: Utilities -->
+    <div class="pipeline-section">
+      <div class="pipeline-section-title">D — Utilities</div>
+      <div class="btn-row top">
+        <button class="btn secondary" onclick="loadGeneration()" id="refreshBtn">🔃 Refresh Status</button>
+        <button class="btn secondary" onclick="copyGenId()" id="copyBtn">📋 Copy Gen ID</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SSE LIVE STREAM -->
+  <div class="card">
+    <div class="section-title">Live SSE Events</div>
+    <div class="sse-controls">
+      <button class="btn sm" onclick="connectSSE()" id="sseConnectBtn">▶ Connect</button>
+      <button class="btn sm secondary" onclick="disconnectSSE()" id="sseDisconnectBtn">⏹ Disconnect</button>
+      <span id="sseDot"><span class="dot dot-gray"></span><span style="color:#555;font-size:12px;">Disconnected</span></span>
+    </div>
+    <div class="log-box" id="sseLog">SSE events will appear here...\n</div>
+  </div>
+
+  <!-- API LOG -->
+  <div class="card">
+    <div class="log-header">
+      <div class="section-title" style="margin:0;border:none;padding:0;">API Response Log</div>
+      <button class="btn sm secondary" onclick="clearApiLog()">Clear</button>
+    </div>
+    <div class="log-box" id="apiLog">API responses will appear here...\n</div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  // ── CONFIG ─────────────────────────────────────────────────────────────────
+  const getConfig = () => ({
+    genId: document.getElementById('genId').value.trim(),
+    token: document.getElementById('token').value.trim(),
+    base:  document.getElementById('baseUrl').value.trim()
+  })
+
+  const getHeaders = (token) => ({
+    'Authorization':   `Bearer ${token}`,
+    'Content-Type':    'application/json',
+    'Idempotency-Key': `test-${Date.now()}`
+  })
+
+  // ── LOAD ────────────────────────────────────────────────────────────────────
+  async function loadGeneration() {
+    const {genId, token, base} = getConfig()
+    if (!genId) { alert('Enter a Gen ID first'); return }
+    try {
+      const res  = await fetch(`${base}/api/generations/${genId}`, { headers: getHeaders(token) })
+      const data = await res.json()
+      logResponse('GET', `/api/generations/${genId}`, res.status, data)
+      renderStatusCard(data)
+    } catch(err) {
+      logResponse('GET', `/api/generations/${genId}`, 'ERR', { error: String(err) })
+    }
+  }
+
+  // ── STATUS CARD ─────────────────────────────────────────────────────────────
+  function renderStatusCard(data) {
+    document.getElementById('statusCard').style.display = 'block'
+
+    const genId = data.gen_id || data.id || '—'
+    document.getElementById('displayGenId').textContent = genId
+
+    // badge
+    const status = data.status || 'unknown'
+    document.getElementById('statusBadge').innerHTML = makeBadge(status)
+
+    // b-roll clip count
+    const plan = data.b_roll_plan
+    let clipCount = '—'
+    if (plan && Array.isArray(plan.clips)) clipCount = plan.clips.length + ' clips'
+    else if (plan && typeof plan === 'object') clipCount = JSON.stringify(plan).slice(0,60)
+    document.getElementById('bRollCount').textContent = clipCount
+
+    // preview url
+    const previewUrl = data.preview_url
+    if (previewUrl) {
+      document.getElementById('previewUrlCell').innerHTML =
+        `<a class="preview-link" href="${previewUrl}" target="_blank">${previewUrl}</a>`
+    } else {
+      document.getElementById('previewUrlCell').textContent = '—'
+    }
+
+    // PNG thumbnail
+    const pngUrl = data.isolated_png_url
+    if (pngUrl) {
+      document.getElementById('thumbWrap').style.display = 'block'
+      document.getElementById('pngThumb').src = pngUrl
+    } else {
+      document.getElementById('thumbWrap').style.display = 'none'
+    }
+  }
+
+  function makeBadge(status) {
+    const s = (status || '').toLowerCase()
+    let cls = 'badge-gray'
+    if (s === 'funds_locked')                   cls = 'badge-orange'
+    else if (['rendering','reflecting','composing'].includes(s)) cls = 'badge-blue badge-pulse'
+    else if (s === 'preview_ready')             cls = 'badge-green'
+    else if (s === 'export_queued')             cls = 'badge-purple'
+    else if (s === 'export_ready')              cls = 'badge-bright'
+    else if (['failed_render','failed_export'].includes(s)) cls = 'badge-red'
+    return `<span class="badge ${cls}">${status}</span>`
+  }
+
+  // ── COORDINATOR ─────────────────────────────────────────────────────────────
+  async function enqueueCoordinator() {
+    const {genId, token, base} = getConfig()
+    if (!genId) { alert('Enter a Gen ID first'); return }
+    try {
+      const res  = await fetch(`${base}/api/generations/${genId}/approve-strategy`, {
+        method:  'POST',
+        headers: getHeaders(token),
+        body:    JSON.stringify({})
+      })
+      const data = await res.json()
+      logResponse('POST', `/api/generations/${genId}/approve-strategy`, res.status, data)
+      setTimeout(loadGeneration, 2000)
+    } catch(err) {
+      logResponse('POST', '/approve-strategy', 'ERR', { error: String(err) })
+    }
+  }
+
+  // ── DECLARATION ─────────────────────────────────────────────────────────────
+  async function submitDeclaration() {
+    const checks = ['check1','check2','check3'].map(id => document.getElementById(id).checked)
+    if (!checks.every(Boolean)) { alert('All 3 checkboxes must be checked'); return }
+    const {genId, token, base} = getConfig()
+    if (!genId) { alert('Enter a Gen ID first'); return }
+    try {
+      const res  = await fetch(`${base}/api/generations/${genId}/declaration`, {
+        method:  'POST',
+        headers: getHeaders(token),
+        body:    JSON.stringify({ commercial_use: true, image_rights: true, ai_disclosure: true })
+      })
+      const data = await res.json()
+      logResponse('POST', `/api/generations/${genId}/declaration`, res.status, data)
+      setTimeout(loadGeneration, 2000)
+    } catch(err) {
+      logResponse('POST', '/declaration', 'ERR', { error: String(err) })
+    }
+  }
+
+  // ── RETRY EXPORT ─────────────────────────────────────────────────────────────
+  async function retryExport() {
+    const resign = document.getElementById('resignCheck').checked
+    const {genId, token, base} = getConfig()
+    if (!genId) { alert('Enter a Gen ID first'); return }
+    try {
+      const res  = await fetch(`${base}/api/generations/${genId}/retry-export`, {
+        method:  'POST',
+        headers: getHeaders(token),
+        body:    JSON.stringify({ resign })
+      })
+      const data = await res.json()
+      logResponse('POST', `/api/generations/${genId}/retry-export`, res.status, data)
+      setTimeout(loadGeneration, 2000)
+    } catch(err) {
+      logResponse('POST', '/retry-export', 'ERR', { error: String(err) })
+    }
+  }
+
+  // ── SSE ──────────────────────────────────────────────────────────────────────
+  let sseSource = null
+
+  function connectSSE() {
+    const {genId, base} = getConfig()
+    if (!genId) { alert('Enter a Gen ID first'); return }
+    if (sseSource) { sseSource.close() }
+    sseSource = new EventSource(`${base}/api/sse/${genId}`)
+    sseSource.onopen    = () => setSseDot(true)
+    sseSource.onmessage = (e) => appendSSELog(e.data)
+    sseSource.onerror   = () => {
+      appendSSELog('[SSE error / disconnected]')
+      setSseDot(false)
+    }
+    appendSSELog(`Connecting to ${base}/api/sse/${genId}...`)
+  }
+
+  function disconnectSSE() {
+    if (sseSource) { sseSource.close(); sseSource = null }
+    appendSSELog('Manually disconnected.')
+    setSseDot(false)
+  }
+
+  function setSseDot(connected) {
+    const el = document.getElementById('sseDot')
+    if (connected) {
+      el.innerHTML = `<span class="dot dot-green"></span><span style="color:#22c55e;font-size:12px;">Connected</span>`
+    } else {
+      el.innerHTML = `<span class="dot dot-gray"></span><span style="color:#555;font-size:12px;">Disconnected</span>`
+    }
+  }
+
+  function appendSSELog(msg) {
+    const ts  = new Date().toLocaleTimeString()
+    const box = document.getElementById('sseLog')
+    box.textContent += `[${ts}] ${msg}\n`
+    box.scrollTop = box.scrollHeight
+  }
+
+  // ── API LOG ──────────────────────────────────────────────────────────────────
+  function logResponse(method, path, status, data) {
+    const ts    = new Date().toLocaleTimeString()
+    const ok    = typeof status === 'number' && status < 300
+    const line  = `[${ts}] ${method} ${path} → ${status}\n${JSON.stringify(data, null, 2)}\n`
+    const sep   = '─'.repeat(60) + '\n'
+    const box   = document.getElementById('apiLog')
+    // prepend so newest is on top
+    box.textContent = line + sep + box.textContent
+    // trim if too long
+    if (box.textContent.length > 80000) box.textContent = box.textContent.slice(0, 80000)
+  }
+
+  function clearApiLog() {
+    document.getElementById('apiLog').textContent = ''
+  }
+
+  // ── UTILS ─────────────────────────────────────────────────────────────────────
+  function copyGenId() {
+    const val = document.getElementById('genId').value
+    if (!val) { alert('No Gen ID to copy'); return }
+    navigator.clipboard.writeText(val).then(() => {
+      const btn = document.getElementById('copyBtn')
+      const orig = btn.textContent
+      btn.textContent = '✓ Copied!'
+      setTimeout(() => btn.textContent = orig, 1500)
+    })
+  }
+</script>
+</body>
+</html>
