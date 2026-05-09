@@ -16,11 +16,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── Module-level singletons (instantiated once, shared across requests) ──
-gateway = ModelGateway()
-compliance_gate = ComplianceGate()
-cost_guard = CostGuard()
-output_guard = OutputGuard()
-prompt_catalog = PromptCatalog()
 
 # ── Request model ──
 class ChatRequest(BaseModel):
