@@ -56,11 +56,12 @@ class CostGuard:
         await self.redis_db2.expire(key, 24 * 3600)
         
         # 2. Update Postgres (Immutable Audit Log for Billing/Analytics)
-        await self.db.execute(
-            """INSERT INTO agent_traces (gen_id, worker, model_used, cost_inr, selection_reason) 
-               VALUES ($1, $2, $3, $4, $5)""", 
-            gen_id, worker, model_used, Decimal(str(cost_inr)), f"{worker} via {model_used}"
-        )
+        async with self.db.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO agent_traces (gen_id, worker, model_used, cost_inr, selection_reason) 
+                   VALUES ($1, $2, $3, $4, $5)""", 
+                gen_id, worker, model_used, Decimal(str(cost_inr)), f"{worker} via {model_used}"
+            )
 
     # ── BLOCK 3: POST-HOC AUDIT (End of lifecycle) ──
     async def check_post_hoc(self, gen_id: str) -> None:
@@ -69,7 +70,8 @@ class CostGuard:
         Graceful Degradation: If COGS overshoots due to fallbacks, we DO NOT block 
         the user. We emit an alert for engineering to tune the routing weights.
         """
-        gen = await self.db.fetchrow("SELECT cogs_total, plan_tier FROM generations WHERE gen_id=$1", gen_id)
+        async with self.db.acquire() as conn:
+            gen = await conn.fetchrow("SELECT cogs_total, plan_tier FROM generations WHERE gen_id=$1", gen_id)
         if not gen: return
             
         ceiling = self.CEILING.get(gen["plan_tier"], Decimal("0.0"))

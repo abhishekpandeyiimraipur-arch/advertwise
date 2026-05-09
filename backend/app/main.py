@@ -17,8 +17,12 @@ import asyncpg
 from .infra_redis import RedisManager
 from .infra_gateway import add_exception_handlers
 from .api.routes import router
-from app.routes.generations import router as generations_router
-from app.routes.generation_advance import router as advance_router
+from app.api.routes.generations import router as generations_router
+from app.api.routes.advance import router as advance_router
+from app.api.routes.regenerate import router as regenerate_router
+from app.api.routes.edit_back import router as edit_back_router
+from app.api.routes.approve_strategy import router as approve_strategy_router
+from app.api.routes.chat import router as chat_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -87,3 +91,7 @@ async def dev_ui():
 app.include_router(router)
 app.include_router(generations_router)
 app.include_router(advance_router)
+app.include_router(regenerate_router)
+app.include_router(edit_back_router)
+app.include_router(approve_strategy_router)
+app.include_router(chat_router)

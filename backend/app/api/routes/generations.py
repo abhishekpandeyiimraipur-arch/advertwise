@@ -9,7 +9,8 @@ from fastapi import APIRouter, Request, Header, Depends
 from starlette.datastructures import UploadFile
 
 # Use absolute import as per the project's standard
-from app.infra_gateway import idempotent, AdvertWiseException
+from app.api.dependencies import idempotent
+from app.infra_gateway import AdvertWiseException
 from app.auth import get_current_user
 
 logger = logging.getLogger(__name__)
