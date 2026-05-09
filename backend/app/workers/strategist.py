@@ -3,7 +3,7 @@ import logging
 from dataclasses import asdict
 
 from app.types.script import Script
-from app.workers.broll_planner import (
+from app.broll.planner import (
     BRollPlanner,
     MOTION_NAMES,
     ENV_NAMES,
