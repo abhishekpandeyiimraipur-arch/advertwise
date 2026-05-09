@@ -5,7 +5,7 @@ from typing import Annotated, Any, Optional
 from fastapi import APIRouter, Request, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
 from app.api.dependencies import idempotent, get_current_user
-from app.infra_gateway import AdvertWiseException
+from app.core.exceptions import AdvertWiseException
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["generations"])

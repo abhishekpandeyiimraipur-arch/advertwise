@@ -2,7 +2,8 @@ import json
 from functools import wraps
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from app.infra_gateway import AdvertWiseException, ECMCode
+from app.core.exceptions import AdvertWiseException
+from app.schemas.enums import ECMCode
 
 def idempotent(ttl: int = 300, action_key: str = "default", cache_only_2xx: bool = True):
     """

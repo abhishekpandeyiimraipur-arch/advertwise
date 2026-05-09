@@ -16,6 +16,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env.local")
 import asyncpg
 from .infra_redis import RedisManager
 from .infra_gateway import add_exception_handlers
+from app.gateway import ModelGateway
 from .api.routes import router
 from app.api.routes.generations import router as generations_router
 from app.api.routes.advance import router as advance_router
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
     app.state.redis_db2 = redis_mgr.db2
     app.state.redis_db5 = redis_mgr.db5
     app.state.redis_mgr = redis_mgr
+    app.state.gateway = ModelGateway(redis_client=redis_mgr.db0)
     logger.info("Application wiring complete. Redis + DB loaded.")
 
     app.state.db = app.state.db_pool

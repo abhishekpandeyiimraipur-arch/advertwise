@@ -10,7 +10,7 @@ from starlette.datastructures import UploadFile
 
 # Use absolute import as per the project's standard
 from app.api.dependencies import idempotent
-from app.infra_gateway import AdvertWiseException
+from app.core.exceptions import AdvertWiseException
 from app.auth import get_current_user
 
 logger = logging.getLogger(__name__)

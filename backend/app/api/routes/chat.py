@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from app.api.dependencies import idempotent, get_current_user, get_db
-from app.infra_gateway import ModelGateway
+from app.gateway import ModelGateway
 from app.services.compliance_gate import ComplianceGate
 from app.services.cost_guard import CostGuard
 from app.services.output_guard import OutputGuard
