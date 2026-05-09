@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from app.api.dependencies import idempotent, get_current_user, get_db
-from app.infra_gateway import ModelGateway
+from app.gateway import ModelGateway
 from app.services.compliance_gate import ComplianceGate
 from app.services.cost_guard import CostGuard
 from app.services.output_guard import OutputGuard
@@ -15,11 +15,9 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# ── Module-level singletons (instantiated once, shared across requests) ──
+# ── Module-level singletons ──
 gateway = ModelGateway()
 compliance_gate = ComplianceGate()
-cost_guard = CostGuard()
-output_guard = OutputGuard()
 prompt_catalog = PromptCatalog()
 
 # ── Request model ──
@@ -69,6 +67,11 @@ async def chat(
         current_script = Script(**safe_scripts[idx])
 
     # ── STEP 3: Instantiate and run CopilotChain ──
+    cost_guard = CostGuard(
+        redis_db2=request.app.state.redis_db2,
+        db_pool=request.app.state.db_pool,
+    )
+    output_guard = OutputGuard(gateway=gateway)
     chain = CopilotChain(
         gateway=gateway,
         compliance_gate=compliance_gate,
