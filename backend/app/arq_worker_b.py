@@ -1,6 +1,7 @@
 from arq.connections import RedisSettings
 import os
 from app.workers.phase4_coordinator import phase4_coordinator
+from app.workers.export import worker_export
 
 # Phase 4 workers do not exist yet — they are built in Micro-phase 4.
 # This file is a locked placeholder that defines the Process B bulkhead.
@@ -57,7 +58,7 @@ class WorkerSettings:
 
     functions = [
         phase4_coordinator,
-        # worker_export — added when export.py is built
+        worker_export,
     ]
 
     on_startup = startup
