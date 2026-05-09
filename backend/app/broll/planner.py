@@ -40,12 +40,11 @@ ENV_NAMES: dict[int, str] = {
 # environment_preset_id is NULL in DB (new user, first generation).
 # Keys match GreenZoneCategory ENUM values exactly.
 COLD_START_DEFAULTS: dict[str, dict] = {
-    "packaged_food":  {"motion_archetype_id": 2, "environment_preset_id": 3},
-    "d2c_beauty":     {"motion_archetype_id": 4, "environment_preset_id": 1},
-    "electronics":    {"motion_archetype_id": 1, "environment_preset_id": 2},
-    "fashion":        {"motion_archetype_id": 2, "environment_preset_id": 4},
-    "home_decor":     {"motion_archetype_id": 2, "environment_preset_id": 5},
-    "home_kitchen":   {"motion_archetype_id": 3, "environment_preset_id": 3},
+    "packaged_food":    {"motion_archetype_id": 2, "environment_preset_id": 3},
+    "d2c_beauty":       {"motion_archetype_id": 4, "environment_preset_id": 1},
+    "electronics":      {"motion_archetype_id": 1, "environment_preset_id": 2},
+    "hard_accessories": {"motion_archetype_id": 3, "environment_preset_id": 2},
+    "home_kitchen":     {"motion_archetype_id": 2, "environment_preset_id": 3},
 }
 # Fallback for any category not in COLD_START_DEFAULTS
 DEFAULT_STYLE_FALLBACK = {"motion_archetype_id": 2, "environment_preset_id": 1}
@@ -65,42 +64,64 @@ class BRollPlanner:
     If no clips match → returns [] (b_roll_available: false on HD-5)
     """
 
+    ANGLE_TO_HOOK_ARCHETYPE: dict[str, str] = {
+        "emotion":    "abstract",
+        "logic":      "motion",
+        "conversion": "motion",
+    }
+
+    ANGLE_TO_CTA_ARCHETYPE: dict[str, str] = {
+        "emotion":    "texture",
+        "logic":      "packaging",
+        "conversion": "warehouse",
+    }
+
     def __init__(self, db_pool):
         self.db = db_pool
 
-    async def plan(
-        self,
-        framework_angle: str,
-        category: str,
-    ) -> list[dict]:
+    async def plan(self, framework_angle: str, category: str) -> list[dict]:
         """
-        Returns up to 3 B-roll clip dicts for the given angle + category.
-
-        Args:
-            framework_angle: "emotion" | "logic" | "conversion"
-            category: GreenZoneCategory value e.g. "packaged_food"
-
-        Returns:
-            list of dicts with keys: clip_id, r2_url, duration_ms, archetype
-            Empty list if no matching clips found.
+        Returns [hook_clip, cta_clip] for the given framework angle.
+        hook_clip  → played at 0s-3s  (Hook segment)
+        cta_clip   → played at 12s-15s (CTA segment)
+        
+        - Maps framework_angle to archetype via ANGLE_TO_*_ARCHETYPE.
+        - Does NOT filter by category (clips are generic B-roll).
+        - Returns empty list [] on any DB failure (graceful degradation).
+        - Returns [] if either hook or CTA query returns zero rows
+          (b_roll_available=False on HD-5, compose skips B-roll).
         """
+        hook_archetype = self.ANGLE_TO_HOOK_ARCHETYPE.get(framework_angle, "abstract")
+        cta_archetype = self.ANGLE_TO_CTA_ARCHETYPE.get(framework_angle, "texture")
+
         try:
             async with self.db.acquire() as conn:
-                rows = await conn.fetch(
+                hook_row = await conn.fetchrow(
                     """SELECT clip_id, r2_url, duration_ms, archetype
                        FROM broll_clips
                        WHERE archetype = $1
-                         AND category = $2
                          AND is_active = TRUE
-                       ORDER BY clip_id
-                       LIMIT 3""",
-                    framework_angle,
-                    category,
+                       ORDER BY RANDOM()
+                       LIMIT 1""",
+                    hook_archetype
                 )
-            return [dict(row) for row in rows]
+                if not hook_row:
+                    return []
+
+                cta_row = await conn.fetchrow(
+                    """SELECT clip_id, r2_url, duration_ms, archetype
+                       FROM broll_clips
+                       WHERE archetype = $1
+                         AND is_active = TRUE
+                       ORDER BY RANDOM()
+                       LIMIT 1""",
+                    cta_archetype
+                )
+                if not cta_row:
+                    return []
+
+            return [dict(hook_row), dict(cta_row)]
         except Exception as e:
-            # Graceful degradation — broll_clips table may be empty
-            # during beta. Return empty list, not an error.
             logger.warning(
                 f"BRollPlanner: query failed for "
                 f"angle={framework_angle} category={category}: {e}. "
