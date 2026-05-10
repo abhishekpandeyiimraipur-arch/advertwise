@@ -69,7 +69,7 @@ COST_RATES: dict[str, tuple] = {
 
 # Provider pool order defines fallback priority (index 0 = primary)
 PROVIDER_POOLS: dict[str, list[str]] = {
-    "llm":        ["deepseek-v3", "groq-llama-3.3-70b", "together-llama-3.3"],
+    "llm":        ["groq-llama-3.3-70b", "together-llama-3.3"],
     "moderation": ["together-llama-guard-3", "groq-llama-guard-3"],
 }
 

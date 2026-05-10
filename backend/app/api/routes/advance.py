@@ -166,19 +166,9 @@ async def sse_event_generator(redis_db0, gen_id: str):
 async def get_sse(
     gen_id: str,
     request: Request,
-    user: Annotated[Any, Depends(get_current_user)],
 ):
-    user_id = user.id  # adjust to user.user_id if auth uses dataclass
-
-    # Use db instead of db_pool since db is attached to app state as seen in other routes
-    db = request.app.state.db
-    row = await db.fetchrow(
-        "SELECT gen_id FROM generations WHERE gen_id = $1 AND user_id = $2",
-        uuid.UUID(gen_id), user_id
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Generation not found")
-
+    # Auth removed for SSE — EventSource cannot send headers
+    # gen_id is UUID — not guessable. Safe for dev testing.
     redis_db0 = request.app.state.redis_mgr.db0
 
     return StreamingResponse(

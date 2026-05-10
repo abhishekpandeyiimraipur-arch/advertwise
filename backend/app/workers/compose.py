@@ -38,7 +38,7 @@ SGI_WATERMARK_FILTER = (
     "drawtext=text='AI Generated Content | AdvertWise':"
     "fontsize=16:fontcolor=white@0.8:"
     "x=10:y=h-40:"
-    "box=1:boxcolor=black@0.3:boxpadding=4"
+    "box=1:boxcolor=black@0.3:boxborderw=4"
 )
 
 
@@ -95,51 +95,43 @@ class WorkerCompose:
         lut_path: str,
     ) -> str:
         """
-        Builds FFmpeg filter_complex string for 15s composition.
-
-        Input stream mapping:
-          [0:v] = hook clip  (3s B-Roll)
-          [1:v] = i2v clip   (9s AI video)
-          [2:v] = cta clip   (3s B-Roll)
-          [3:a] = tts audio  (variable duration)
-
-        Filter chain:
-        1. Pad + trim each video segment to exact target duration.
-        2. Concat 3 segments → apply LUT → burn watermark.
-        3. Trim + pad audio to exactly 15s.
+        Builds FFmpeg filter_complex for 15s vertical 1080x1920 composition.
+        All inputs scaled to 1080x1920 before concat.
+        Output: vertical 9:16 format.
         """
-        # Compute pad amounts (never negative)
-        hook_pad = max(0.0, 3.0 - hook_duration)
-        i2v_pad  = max(0.0, 9.0 - i2v_duration)
-        cta_pad  = max(0.0, 3.0 - cta_duration)
+        # Target dimensions: 1080x1920 vertical (9:16)
+        W, H = 1080, 1920
 
-        # FFmpeg requires forward slashes even on Windows
-        lut_path_fwd = str(lut_path).replace(os.sep, "/")
-
-        fg = (
-            # ── 1. Pad + trim each segment ──────────────────────
-            f"[0:v]tpad=stop_mode=clone:stop_duration={hook_pad:.3f},"
-            f"trim=end=3.0,setpts=PTS-STARTPTS[hook_v];"
-
-            f"[1:v]tpad=stop_mode=clone:stop_duration={i2v_pad:.3f},"
-            f"trim=end=9.0,setpts=PTS-STARTPTS[i2v_v];"
-
-            f"[2:v]tpad=stop_mode=clone:stop_duration={cta_pad:.3f},"
-            f"trim=end=3.0,setpts=PTS-STARTPTS[cta_v];"
-
-            # ── 2. Concat 3 video streams ────────────────────────
-            f"[hook_v][i2v_v][cta_v]concat=n=3:v=1:a=0[concat_v];"
-
-            # ── 3. Apply LUT color grade ─────────────────────────
-            f"[concat_v]lut3d={lut_path_fwd}[graded_v];"
-
-            # ── 4. Burn SGI watermark (after LUT — mandatory) ────
-            f"[graded_v]{SGI_WATERMARK_FILTER}[watermarked_v];"
-
-            # ── 5. Trim + pad audio to exactly 15s ───────────────
-            f"[3:a]atrim=end=15.0,apad=whole_dur=15.0[padded_a]"
+        # Scale + pad each segment to target size
+        # force_original_aspect_ratio=decrease then pad to fill
+        scale_hook = (
+            f"[0:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=decrease,"
+            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"tpad=stop_mode=clone:stop_duration={max(0.0, 3.0-hook_duration):.3f},"
+            f"trim=end=3.0,setsar=1[hook_v]"
         )
-        return fg
+        scale_i2v = (
+            f"[1:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=decrease,"
+            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"tpad=stop_mode=clone:stop_duration={max(0.0, 9.0-i2v_duration):.3f},"
+            f"trim=end=9.0,setsar=1[i2v_v]"
+        )
+        scale_cta = (
+            f"[2:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=decrease,"
+            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"tpad=stop_mode=clone:stop_duration={max(0.0, 3.0-cta_duration):.3f},"
+            f"trim=end=3.0,setsar=1[cta_v]"
+        )
+        concat     = "[hook_v][i2v_v][cta_v]concat=n=3:v=1:a=0[concat_v]"
+        lut        = f"[concat_v]lut3d={lut_path}[graded_v]"
+        watermark  = f"[graded_v]{SGI_WATERMARK_FILTER}[watermarked_v]"
+        audio      = "[3:a]atrim=end=15.0,apad=whole_dur=15.0[padded_a]"
+
+        parts = [scale_hook, scale_i2v, scale_cta, concat, lut, watermark, audio]
+        sep = ";" + chr(10)
+        return sep.join(parts)
+
+
 
     def _build_ffmpeg_cmd(
         self,
@@ -167,7 +159,8 @@ class WorkerCompose:
             "-map", "[padded_a]",
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
-            "-t", "15",
+            "-r", "30",
+                "-t", "15",
             output_path,
         ]
 
