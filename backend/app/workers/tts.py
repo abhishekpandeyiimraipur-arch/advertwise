@@ -1,3 +1,4 @@
+import os
 """
 WorkerTTS — Text-to-speech synthesis with rule-based provider routing.
 [TDD-WORKERS]-H
@@ -167,6 +168,7 @@ class WorkerTTS:
         r2_key = f"{gen_id}/tts/voiceover.mp3"
         try:
             self.r2_client.put_object(
+                Bucket=os.environ["R2_BUCKET_NAME"],
                 Body=audio_bytes,
                 Key=r2_key,
             )

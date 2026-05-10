@@ -124,6 +124,16 @@ I2V_MODELS: dict = {
 # Fallback model if requested model not in registry
 I2V_DEFAULT_MODEL = "fal-ai/wan-i2v"
 
+# Replicate models (fallback when Fal.ai exhausted)
+REPLICATE_API_BASE = "https://api.replicate.com/v1"
+REPLICATE_MODELS: dict = {
+    "replicate/wan-2.1-i2v": {
+        "version": "e2870aa4965fd9ddfd87c16a3c8ab952c18e745e63f3f3b123c2dc8b538ad2b5",
+        "key_env": "REPLICATE_API_TOKEN",
+        "cost_inr": Decimal("12.00"),
+    },
+}
+
 class ModelGateway:
     def __init__(self, redis_client=None):
         self.together_key = os.environ.get("TOGETHER_API_KEY", "")
@@ -588,6 +598,156 @@ class ModelGateway:
             raw = data["choices"][0]["message"]["content"]
             return _parse_json_response(raw)
 
+
+    async def _call_replicate_i2v(self, input_data: dict) -> GatewayResponse:
+        """
+        Replicate I2V fallback via raw HTTP.
+        Pattern: POST /predictions → poll GET /predictions/{id}
+        """
+        import httpx, asyncio
+
+        image_url = input_data.get("image_url", "")
+        prompt    = input_data.get("prompt", "")
+        duration  = input_data.get("duration", 9)
+        seed      = input_data.get("seed", 42)
+        gen_id    = input_data.get("gen_id", "")
+
+        model_cfg = REPLICATE_MODELS["replicate/wan-2.1-i2v"]
+        api_key   = os.environ.get(model_cfg["key_env"], "") or os.environ.get("REPLICATE_API_TOKEN", "")
+        if not api_key:
+            raise ProviderUnavailableError("REPLICATE_API_TOKEN not set")
+        headers   = {
+            "Authorization": f"Token {api_key}",
+            "Content-Type":  "application/json",
+        }
+
+        logger.info(f"Replicate I2V submit gen={gen_id}")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+
+            # Step 1: Submit
+            submit_resp = await client.post(
+                f"{REPLICATE_API_BASE}/predictions",
+                json={
+                    "version": model_cfg["version"],
+                    "input": {
+                        "image":  image_url,
+                        "prompt": prompt,
+                        "seed":   seed,
+                    },
+                },
+                headers=headers,
+            )
+
+            if submit_resp.status_code not in (200, 201):
+                await self._record_health("replicate", "i2v", False)
+                raise ProviderUnavailableError(
+                    f"Replicate submit failed {submit_resp.status_code}: "
+                    f"{submit_resp.text[:300]}"
+                )
+
+            prediction_id = submit_resp.json().get("id", "")
+            logger.info(f"Replicate I2V queued gen={gen_id} id={prediction_id}")
+
+            # Step 2: Poll every 5s (max 200s)
+            for attempt in range(40):
+                await asyncio.sleep(5)
+                poll_resp = await client.get(
+                    f"{REPLICATE_API_BASE}/predictions/{prediction_id}",
+                    headers=headers,
+                    timeout=10.0,
+                )
+                if poll_resp.status_code != 200:
+                    continue
+
+                poll_data = poll_resp.json()
+                status    = poll_data.get("status", "")
+                logger.info(
+                    f"Replicate poll gen={gen_id} "
+                    f"attempt={attempt+1} status={status}"
+                )
+
+                if status == "succeeded":
+                    output = poll_data.get("output", [])
+                    video_url = output[0] if output else ""
+                    if not video_url:
+                        raise ProviderUnavailableError(
+                            f"Replicate succeeded but no output gen={gen_id}"
+                        )
+                    await self._record_health("replicate", "i2v", True)
+                    logger.info(
+                        f"Replicate I2V done gen={gen_id} "
+                        f"url={video_url[:60]}..."
+                    )
+                    return GatewayResponse(
+                        video_url=video_url,
+                        model_used="replicate/wan-2.1-i2v",
+                        cost_inr=model_cfg["cost_inr"],
+                    )
+                elif status in ("failed", "canceled"):
+                    await self._record_health("replicate", "i2v", False)
+                    error = poll_data.get("error", "unknown")
+                    raise ProviderUnavailableError(
+                        f"Replicate {status} gen={gen_id}: {error}"
+                    )
+
+            await self._record_health("replicate", "i2v", False)
+            raise ProviderUnavailableError(
+                f"Replicate timeout after 200s gen={gen_id}"
+            )
+
+
+    async def _call_minimax_i2v(self, input_data: dict) -> GatewayResponse:
+        import httpx, asyncio
+        image_url = input_data.get("image_url", "")
+        prompt    = input_data.get("prompt", "")
+        gen_id    = input_data.get("gen_id", "")
+        api_key   = os.environ.get("MINIMAX_API_KEY", "")
+        headers   = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        logger.info(f"Minimax I2V submit gen={gen_id}")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            submit_resp = await client.post(
+                "https://api.minimax.io/v1/video_generation",
+                json={"model": "MiniMax-Hailuo-2.3", "prompt": prompt,
+                      "first_frame_image": image_url, "duration": 6, "resolution": "768P"},
+                headers=headers,
+            )
+            if submit_resp.status_code not in (200, 201):
+                await self._record_health("minimax", "i2v", False)
+                raise ProviderUnavailableError(f"Minimax submit failed {submit_resp.status_code}: {submit_resp.text[:300]}")
+            task_id = submit_resp.json().get("task_id", "")
+            if not task_id:
+                raise ProviderUnavailableError(f"Minimax no task_id gen={gen_id}: {submit_resp.text[:200]}")
+            logger.info(f"Minimax I2V queued gen={gen_id} task_id={task_id}")
+            for attempt in range(40):
+                await asyncio.sleep(5)
+                poll_resp = await client.get("https://api.minimax.io/v1/query/video_generation",
+                    params={"task_id": task_id}, headers=headers, timeout=10.0)
+                if poll_resp.status_code != 200:
+                    continue
+                poll_data = poll_resp.json()
+                status = poll_data.get("status", "")
+                logger.info(f"Minimax poll gen={gen_id} attempt={attempt+1} status={status}")
+                if status == "Success":
+                    file_id = poll_data.get("file_id", "")
+                    break
+                elif status in ("Fail", "Failed", "Cancelled"):
+                    await self._record_health("minimax", "i2v", False)
+                    raise ProviderUnavailableError(f"Minimax {status} gen={gen_id}")
+            else:
+                await self._record_health("minimax", "i2v", False)
+                raise ProviderUnavailableError(f"Minimax timeout 200s gen={gen_id}")
+            file_resp = await client.get("https://api.minimax.io/v1/files/retrieve",
+                params={"file_id": file_id}, headers=headers, timeout=10.0)
+            if file_resp.status_code != 200:
+                raise ProviderUnavailableError(f"Minimax file retrieve failed {file_resp.status_code} gen={gen_id}")
+            video_url = file_resp.json().get("file", {}).get("download_url", "")
+            if not video_url:
+                raise ProviderUnavailableError(f"Minimax no download_url gen={gen_id}")
+        await self._record_health("minimax", "i2v", True)
+        logger.info(f"Minimax I2V done gen={gen_id} url={video_url[:60]}...")
+        return GatewayResponse(video_url=video_url, model_used="MiniMax-Hailuo-2.3", cost_inr=Decimal("18.00"))
+
     # ══════════════════════════════════════════════════════
     # TTS ROUTING
     # ══════════════════════════════════════════════════════
@@ -649,13 +809,13 @@ class ModelGateway:
         payload = {
             "inputs":               [text],
             "target_language_code": lang_code,
-            "speaker":              "meera",
+            "speaker":              "anushka",
             "pitch":                0,
             "pace":                 1.0,
             "loudness":             1.5,
             "speech_sample_rate":   22050,
             "enable_preprocessing": True,
-            "model":                "bulbul:v1",
+            "model":                "bulbul:v2",
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -743,18 +903,32 @@ class ModelGateway:
 
     async def _route_i2v(self, input_data: dict) -> GatewayResponse:
         """
-        Routes I2V request to Fal.ai using raw HTTP queue pattern.
-        Works for ANY Fal.ai model — wan, kling, minimax, seedance.
-        Switching model = change model string in WorkerI2V only.
-
-        input_data: {image_url, model, prompt, duration, seed, gen_id}
-        Returns GatewayResponse(video_url=str)
-
-        Fal.ai queue pattern (identical for all models):
-          1. POST  /queue/fal.run/{model} → request_id
-          2. GET   /queue.fal.run/{model}/requests/{id}/status → poll
-          3. GET   /queue.fal.run/{model}/requests/{id} → result
+        I2V with 3-provider fallback chain:
+        1. Fal.ai → 2. Replicate → 3. Minimax
+        Moves to next provider on 402/403/credit errors.
         """
+        gen_id = input_data.get("gen_id", "")
+
+        try:
+            return await self._call_fal_i2v(input_data)
+        except ProviderUnavailableError as e:
+            if any(x in str(e) for x in ["403", "402", "Exhausted", "locked", "credit", "balance"]):
+                logger.warning(f"Fal.ai exhausted gen={gen_id} — trying Replicate")
+            else:
+                raise
+
+        try:
+            return await self._call_replicate_i2v(input_data)
+        except ProviderUnavailableError as e:
+            if any(x in str(e) for x in ["402", "403", "credit", "Insufficient"]):
+                logger.warning(f"Replicate exhausted gen={gen_id} — trying Minimax")
+            else:
+                raise
+
+        return await self._call_minimax_i2v(input_data)
+
+    async def _call_fal_i2v(self, input_data: dict) -> GatewayResponse:
+        """Fal.ai I2V via raw HTTP queue."""
         import httpx, asyncio
 
         model     = input_data.get("model", I2V_DEFAULT_MODEL)
