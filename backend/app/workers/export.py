@@ -73,7 +73,6 @@ class WorkerExport:
         """
         try:
             manifest = {
-                "ta_url": "https://timestamp.digicert.com",
                 "claim_generator": "AdvertWise/1.0",
                 "assertions": [
                     {
@@ -439,8 +438,7 @@ class WorkerExport:
                     # 11c. Mark wallet transaction as consumed
                     await conn.execute(
                         """UPDATE wallet_transactions
-                           SET status     = 'consumed',
-                               updated_at = NOW()
+                           SET status     = 'consumed'
                            WHERE gen_id = $1
                              AND type   = 'lock'
                              AND status = 'locked'""",
