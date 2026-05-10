@@ -32,8 +32,8 @@ async def startup(ctx: dict) -> None:
         region_name="auto",
     )
     
-    from app.gateway import StubGateway
-    ctx["gateway"] = StubGateway()
+    from app.gateway import ModelGateway
+    ctx["gateway"] = ModelGateway(redis_client=ctx["redis_db0"])
 
 
 async def shutdown(ctx: dict) -> None:

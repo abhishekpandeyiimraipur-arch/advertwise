@@ -73,6 +73,57 @@ PROVIDER_POOLS: dict[str, list[str]] = {
     "moderation": ["together-llama-guard-3", "groq-llama-guard-3"],
 }
 
+# ── TTS Provider Registry ─────────────────────────────────────────
+# Adding a new TTS provider = add one entry here. Zero other changes.
+TTS_PROVIDERS: dict = {
+    "sarvam": {
+        "url": "https://api.sarvam.ai/text-to-speech",
+        "key_env": "SARVAM_API_KEY",
+        "cost_inr": Decimal("1.50"),
+        "lang_map": {
+            "hindi":    "hi-IN",
+            "hinglish": "hi-IN",
+            "marathi":  "mr-IN",
+            "punjabi":  "pa-IN",
+            "bengali":  "bn-IN",
+            "tamil":    "ta-IN",
+            "telugu":   "te-IN",
+            "english":  "en-IN",
+        },
+    },
+    "elevenlabs": {
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM",
+        "key_env": "ELEVENLABS_API_KEY",
+        "cost_inr": Decimal("3.00"),
+    },
+    "google": {
+        "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+        "key_env": "GOOGLE_APPLICATION_CREDENTIALS",
+        "cost_inr": Decimal("1.00"),
+    },
+}
+
+# ── I2V Provider Registry ─────────────────────────────────────────
+# All Fal.ai models use identical queue pattern.
+# Adding a new model = add one entry here.
+FAL_QUEUE_BASE = "https://queue.fal.run"
+I2V_MODELS: dict = {
+    "fal-ai/wan-i2v": {
+        "key_env": "FAL_KEY",
+        "cost_inr": Decimal("13.00"),
+    },
+    "fal-ai/kling-video/v1.6/standard/image-to-video": {
+        "key_env": "FAL_KEY",
+        "cost_inr": Decimal("25.00"),
+    },
+    "fal-ai/minimax-video/image-to-video": {
+        "key_env": "FAL_KEY",
+        "cost_inr": Decimal("18.00"),
+    },
+}
+# Fallback model if requested model not in registry
+I2V_DEFAULT_MODEL = "fal-ai/wan-i2v"
+
 class ModelGateway:
     def __init__(self, redis_client=None):
         self.together_key = os.environ.get("TOGETHER_API_KEY", "")
@@ -146,12 +197,14 @@ class ModelGateway:
             response = await self._route_moderation(input_data)
             response.latency_ms = int((time.monotonic() - start) * 1000)
 
-        elif capability in ("tts", "i2v", "embedding"):
-            raise NotImplementedError(
-                f"Capability '{capability}' is not yet implemented. "
-                f"Scheduled for Micro-phase 4 (tts, i2v) and "
-                f"Micro-phase 5 (embedding)."
-            )
+        elif capability == "tts":
+            response = await self._route_tts(input_data)
+            response.latency_ms = int((time.monotonic() - start) * 1000)
+        elif capability == "i2v":
+            response = await self._route_i2v(input_data)
+            response.latency_ms = int((time.monotonic() - start) * 1000)
+        elif capability == "embedding":
+            raise NotImplementedError("Embedding: Micro-phase 5.")
 
         else:
             raise ValueError(f"Unknown gateway capability: '{capability}'")
@@ -534,6 +587,315 @@ class ModelGateway:
             data = resp.json()
             raw = data["choices"][0]["message"]["content"]
             return _parse_json_response(raw)
+
+    # ══════════════════════════════════════════════════════
+    # TTS ROUTING
+    # ══════════════════════════════════════════════════════
+
+    async def _route_tts(self, input_data: dict) -> GatewayResponse:
+        """
+        Routes TTS request to correct provider via registry.
+        input_data: {text, language, provider, gen_id}
+        Returns GatewayResponse(audio_bytes=bytes)
+        """
+        provider = input_data.get("provider", "sarvam")
+        text     = input_data.get("text", "")
+        language = input_data.get("language", "hindi")
+        gen_id   = input_data.get("gen_id", "")
+
+        if provider not in TTS_PROVIDERS:
+            logger.warning(
+                f"TTS provider '{provider}' not in registry, "
+                f"falling back to sarvam"
+            )
+            provider = "sarvam"
+
+        config  = TTS_PROVIDERS[provider]
+        api_key = os.environ.get(config["key_env"], "")
+
+        if provider == "sarvam":
+            return await self._call_sarvam_tts(
+                text, language, gen_id, config, api_key
+            )
+        elif provider == "elevenlabs":
+            return await self._call_elevenlabs_tts(
+                text, gen_id, config, api_key
+            )
+        else:
+            # Generic fallback — try sarvam
+            return await self._call_sarvam_tts(
+                text, language, gen_id,
+                TTS_PROVIDERS["sarvam"],
+                os.environ.get("SARVAM_API_KEY", "")
+            )
+
+    async def _call_sarvam_tts(
+        self,
+        text: str,
+        language: str,
+        gen_id: str,
+        config: dict,
+        api_key: str,
+    ) -> GatewayResponse:
+        """
+        Calls Sarvam AI TTS. Returns GatewayResponse(audio_bytes).
+        Sarvam returns base64-encoded WAV audio.
+        """
+        import httpx, base64
+
+        lang_map  = config.get("lang_map", {})
+        lang_code = lang_map.get(language, "hi-IN")
+
+        payload = {
+            "inputs":               [text],
+            "target_language_code": lang_code,
+            "speaker":              "meera",
+            "pitch":                0,
+            "pace":                 1.0,
+            "loudness":             1.5,
+            "speech_sample_rate":   22050,
+            "enable_preprocessing": True,
+            "model":                "bulbul:v1",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                config["url"],
+                json=payload,
+                headers={
+                    "api-subscription-key": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if resp.status_code != 200:
+            await self._record_health("sarvam-bulbul", "tts", False)
+            raise ProviderUnavailableError(
+                f"Sarvam TTS {resp.status_code}: {resp.text[:200]}"
+            )
+
+        data       = resp.json()
+        audio_b64  = data.get("audios", [""])[0]
+        audio_bytes = base64.b64decode(audio_b64)
+
+        await self._record_health("sarvam-bulbul", "tts", True)
+        logger.info(
+            f"Sarvam TTS done gen={gen_id} lang={lang_code} "
+            f"bytes={len(audio_bytes)}"
+        )
+        return GatewayResponse(
+            audio_bytes=audio_bytes,
+            model_used="sarvam-bulbul:v1",
+            cost_inr=config["cost_inr"],
+        )
+
+    async def _call_elevenlabs_tts(
+        self,
+        text: str,
+        gen_id: str,
+        config: dict,
+        api_key: str,
+    ) -> GatewayResponse:
+        """
+        Calls ElevenLabs TTS. Returns GatewayResponse(audio_bytes).
+        ElevenLabs returns raw MP3 bytes directly.
+        """
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                config["url"],
+                json={
+                    "text":     text,
+                    "model_id": "eleven_monolingual_v1",
+                    "voice_settings": {
+                        "stability":        0.5,
+                        "similarity_boost": 0.75,
+                    },
+                },
+                headers={
+                    "xi-api-key":   api_key,
+                    "Content-Type": "application/json",
+                    "Accept":       "audio/mpeg",
+                },
+            )
+
+        if resp.status_code != 200:
+            await self._record_health("elevenlabs", "tts", False)
+            raise ProviderUnavailableError(
+                f"ElevenLabs TTS {resp.status_code}: {resp.text[:200]}"
+            )
+
+        audio_bytes = resp.content
+        await self._record_health("elevenlabs", "tts", True)
+        logger.info(
+            f"ElevenLabs TTS done gen={gen_id} bytes={len(audio_bytes)}"
+        )
+        return GatewayResponse(
+            audio_bytes=audio_bytes,
+            model_used="elevenlabs-rachel",
+            cost_inr=config["cost_inr"],
+        )
+
+    # ══════════════════════════════════════════════════════
+    # I2V ROUTING — Fal.ai Queue Pattern (model-agnostic)
+    # ══════════════════════════════════════════════════════
+
+    async def _route_i2v(self, input_data: dict) -> GatewayResponse:
+        """
+        Routes I2V request to Fal.ai using raw HTTP queue pattern.
+        Works for ANY Fal.ai model — wan, kling, minimax, seedance.
+        Switching model = change model string in WorkerI2V only.
+
+        input_data: {image_url, model, prompt, duration, seed, gen_id}
+        Returns GatewayResponse(video_url=str)
+
+        Fal.ai queue pattern (identical for all models):
+          1. POST  /queue/fal.run/{model} → request_id
+          2. GET   /queue.fal.run/{model}/requests/{id}/status → poll
+          3. GET   /queue.fal.run/{model}/requests/{id} → result
+        """
+        import httpx, asyncio
+
+        model     = input_data.get("model", I2V_DEFAULT_MODEL)
+        image_url = input_data.get("image_url", "")
+        prompt    = input_data.get("prompt", "")
+        duration  = input_data.get("duration", 9)
+        seed      = input_data.get("seed", 42)
+        gen_id    = input_data.get("gen_id", "")
+
+        # Resolve model config — fall back to default if unknown
+        model_config = I2V_MODELS.get(model, I2V_MODELS[I2V_DEFAULT_MODEL])
+        api_key      = os.environ.get(model_config["key_env"], "")
+        headers      = {
+            "Authorization": f"Key {api_key}",
+            "Content-Type":  "application/json",
+        }
+
+        submit_url = f"{FAL_QUEUE_BASE}/{model}"
+        status_url = f"{FAL_QUEUE_BASE}/{model}/requests/{{request_id}}/status"
+        result_url = f"{FAL_QUEUE_BASE}/{model}/requests/{{request_id}}"
+
+        logger.info(
+            f"Fal.ai I2V submit gen={gen_id} model={model} "
+            f"duration={duration}s"
+        )
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+
+            # Step 1: Submit job
+            submit_resp = await client.post(
+                submit_url,
+                json={
+                    "image_url": image_url,
+                    "prompt":    prompt,
+                    "duration":  duration,
+                    "seed":      seed,
+                },
+                headers=headers,
+            )
+
+            if submit_resp.status_code not in (200, 201, 202):
+                await self._record_health("fal-ai", "i2v", False)
+                raise ProviderUnavailableError(
+                    f"Fal.ai submit failed {submit_resp.status_code}: "
+                    f"{submit_resp.text[:300]}"
+                )
+
+            request_id = submit_resp.json().get("request_id", "")
+            if not request_id:
+                raise ProviderUnavailableError(
+                    f"Fal.ai returned no request_id gen={gen_id}"
+                )
+
+            logger.info(
+                f"Fal.ai I2V queued gen={gen_id} "
+                f"request_id={request_id}"
+            )
+
+            # Step 2: Poll status every 5 seconds (max 200 seconds)
+            max_polls = 40
+            poll_interval = 5
+
+            for attempt in range(max_polls):
+                await asyncio.sleep(poll_interval)
+
+                status_resp = await client.get(
+                    status_url.format(request_id=request_id),
+                    headers=headers,
+                    timeout=10.0,
+                )
+
+                if status_resp.status_code != 200:
+                    logger.warning(
+                        f"Fal.ai status check failed attempt={attempt} "
+                        f"status={status_resp.status_code}"
+                    )
+                    continue
+
+                status_data   = status_resp.json()
+                current_status = status_data.get("status", "")
+
+                logger.info(
+                    f"Fal.ai I2V poll gen={gen_id} "
+                    f"attempt={attempt+1}/{max_polls} "
+                    f"status={current_status}"
+                )
+
+                if current_status == "COMPLETED":
+                    break
+                elif current_status in ("FAILED", "CANCELLED"):
+                    await self._record_health("fal-ai", "i2v", False)
+                    raise ProviderUnavailableError(
+                        f"Fal.ai job {current_status} gen={gen_id}"
+                    )
+                # IN_QUEUE or IN_PROGRESS → keep polling
+
+            else:
+                # max_polls exceeded
+                await self._record_health("fal-ai", "i2v", False)
+                raise ProviderUnavailableError(
+                    f"Fal.ai I2V timeout after "
+                    f"{max_polls * poll_interval}s gen={gen_id}"
+                )
+
+            # Step 3: Get result
+            result_resp = await client.get(
+                result_url.format(request_id=request_id),
+                headers=headers,
+                timeout=10.0,
+            )
+
+            if result_resp.status_code != 200:
+                raise ProviderUnavailableError(
+                    f"Fal.ai result fetch failed "
+                    f"{result_resp.status_code} gen={gen_id}"
+                )
+
+            result    = result_resp.json()
+            video_url = (
+                result.get("video", {}).get("url")
+                or result.get("video_url")
+                or ""
+            )
+
+            if not video_url:
+                raise ProviderUnavailableError(
+                    f"Fal.ai returned no video URL gen={gen_id} "
+                    f"result_keys={list(result.keys())}"
+                )
+
+        await self._record_health("fal-ai", "i2v", True)
+        logger.info(
+            f"Fal.ai I2V complete gen={gen_id} model={model} "
+            f"video_url={video_url[:60]}..."
+        )
+
+        return GatewayResponse(
+            video_url=video_url,
+            model_used=model,
+            cost_inr=model_config["cost_inr"],
+        )
 
 
 _gateway_instance = None
