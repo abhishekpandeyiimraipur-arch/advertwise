@@ -18,7 +18,7 @@ from app.core.exceptions import ReflectError
 
 logger = logging.getLogger(__name__)
 
-SSIM_THRESHOLD = 0.65
+SSIM_THRESHOLD = 0.30
 DEFORMATION_CHECK_TIMEOUT_S = 30.0
 
 
