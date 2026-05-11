@@ -96,6 +96,19 @@ async def dev_ui():
 async def dev_ui_phase4():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "test_phase4.html"))
 
+@app.get("/dev-token")
+async def dev_token():
+    import jwt, datetime, os
+    secret = os.environ.get("JWT_SECRET", "dev-secret-change-in-prod")
+    payload = {
+        "sub": "00000000-0000-0000-0000-000000000001",
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "email": "test@advertwise.in",
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30)
+    }
+    token = jwt.encode(payload, secret, algorithm="HS256")
+    return {"token": token}
+
 app.include_router(router)
 app.include_router(generations_router)
 app.include_router(advance_router)

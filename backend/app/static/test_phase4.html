@@ -616,6 +616,16 @@
       setTimeout(() => btn.textContent = orig, 1500)
     })
   }
+
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const res = await fetch('/dev-token')
+      const data = await res.json()
+      document.getElementById('token').value = data.token
+    } catch(e) {
+      console.warn('Could not auto-fetch dev token', e)
+    }
+  })
 </script>
 </body>
 </html>
