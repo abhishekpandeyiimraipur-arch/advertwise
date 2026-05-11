@@ -5,9 +5,21 @@ class AdvertWiseException(Exception):
     All worker and service exceptions inherit from this class.
     The DLQ handler and route error middleware catch this type only.
     """
-    def __init__(self, message: str, ecm_code: str = None):
-        super().__init__(message)
-        self.ecm_code = ecm_code
+    def __init__(
+        self,
+        message: str = "",
+        ecm_code: str = None,
+        code: str = None,
+        status_code: int = 500,
+        context: dict = None,
+    ):
+        # Accept both `code=` and `ecm_code=` — routes use both patterns
+        self.ecm_code = ecm_code or code
+        self.status_code = status_code
+        self.context = context or {}
+        # message falls back to ecm_code string if not provided
+        self.message = message or self.ecm_code or "Internal error"
+        super().__init__(self.message)
 
 
 class ProviderUnavailableError(AdvertWiseException):
