@@ -65,62 +65,108 @@ class BRollPlanner:
     """
 
     ANGLE_TO_HOOK_ARCHETYPE: dict[str, str] = {
-        "emotion":    "abstract",
-        "logic":      "motion",
-        "conversion": "motion",
+        "emotion":               "lifestyle",
+        "logic":                 "lifestyle",
+        "conversion":            "lifestyle",
+        "festival_occasion_hook":"lifestyle",
+        "premium_upgrade":       "lifestyle",
+        "hyper_local_comfort":   "lifestyle",
+        "spec_drop_flex":        "lifestyle",
+        "scarcity_drop":         "lifestyle",
+        "social_proof":          "lifestyle",
+        "pas_micro":             "lifestyle",
+        "myth_buster":           "lifestyle",
+        "asmr_trigger":          "lifestyle",
+        "usage_ritual":          "lifestyle",
+        "roi_durability_flex":   "lifestyle",
+        "clinical_flex":         "lifestyle",
     }
 
     ANGLE_TO_CTA_ARCHETYPE: dict[str, str] = {
-        "emotion":    "texture",
-        "logic":      "packaging",
-        "conversion": "warehouse",
+        "emotion":               "cta_clean",
+        "logic":                 "cta_clean",
+        "conversion":            "cta_clean",
+        "festival_occasion_hook":"cta_clean",
+        "premium_upgrade":       "cta_clean",
+        "hyper_local_comfort":   "cta_clean",
+        "spec_drop_flex":        "cta_clean",
+        "scarcity_drop":         "cta_clean",
+        "social_proof":          "cta_clean",
+        "pas_micro":             "cta_clean",
+        "myth_buster":           "cta_clean",
+        "asmr_trigger":          "cta_clean",
+        "usage_ritual":          "cta_clean",
+        "roi_durability_flex":   "cta_clean",
+        "clinical_flex":         "cta_clean",
     }
 
     def __init__(self, db_pool):
         self.db = db_pool
 
     async def plan(self, framework_angle: str, category: str) -> list[dict]:
-        """
-        Returns [hook_clip, cta_clip] for the given framework angle.
-        hook_clip  → played at 0s-3s  (Hook segment)
-        cta_clip   → played at 12s-15s (CTA segment)
-        
-        - Maps framework_angle to archetype via ANGLE_TO_*_ARCHETYPE.
-        - Does NOT filter by category (clips are generic B-roll).
-        - Returns empty list [] on any DB failure (graceful degradation).
-        - Returns [] if either hook or CTA query returns zero rows
-          (b_roll_available=False on HD-5, compose skips B-roll).
-        """
-        hook_archetype = self.ANGLE_TO_HOOK_ARCHETYPE.get(framework_angle, "abstract")
-        cta_archetype = self.ANGLE_TO_CTA_ARCHETYPE.get(framework_angle, "texture")
+        hook_archetype = self.ANGLE_TO_HOOK_ARCHETYPE.get(
+            framework_angle, "lifestyle"
+        )
+        cta_archetype = self.ANGLE_TO_CTA_ARCHETYPE.get(
+            framework_angle, "cta_clean"
+        )
 
         try:
             async with self.db.acquire() as conn:
+                # Hook clip — match category first, fallback to any category
                 hook_row = await conn.fetchrow(
                     """SELECT clip_id, r2_url, duration_ms, archetype
                        FROM broll_clips
                        WHERE archetype = $1
+                         AND category = $2::green_zone_category
                          AND is_active = TRUE
-                       ORDER BY RANDOM()
+                       ORDER BY clip_id ASC
                        LIMIT 1""",
-                    hook_archetype
+                    hook_archetype, category
                 )
+                if not hook_row:
+                    # Fallback: any category with this archetype
+                    hook_row = await conn.fetchrow(
+                        """SELECT clip_id, r2_url, duration_ms, archetype
+                           FROM broll_clips
+                           WHERE archetype = $1
+                             AND is_active = TRUE
+                           ORDER BY clip_id ASC
+                           LIMIT 1""",
+                        hook_archetype
+                    )
                 if not hook_row:
                     return []
 
+                # CTA clip — match category first, fallback to any category
                 cta_row = await conn.fetchrow(
                     """SELECT clip_id, r2_url, duration_ms, archetype
                        FROM broll_clips
                        WHERE archetype = $1
+                         AND category = $2::green_zone_category
                          AND is_active = TRUE
-                       ORDER BY RANDOM()
+                         AND clip_id != $3
+                       ORDER BY clip_id ASC
                        LIMIT 1""",
-                    cta_archetype
+                    cta_archetype, category, hook_row["clip_id"]
                 )
+                if not cta_row:
+                    # Fallback: any category with this archetype
+                    cta_row = await conn.fetchrow(
+                        """SELECT clip_id, r2_url, duration_ms, archetype
+                           FROM broll_clips
+                           WHERE archetype = $1
+                             AND is_active = TRUE
+                             AND clip_id != $2
+                           ORDER BY clip_id ASC
+                           LIMIT 1""",
+                        cta_archetype, hook_row["clip_id"]
+                    )
                 if not cta_row:
                     return []
 
             return [dict(hook_row), dict(cta_row)]
+
         except Exception as e:
             logger.warning(
                 f"BRollPlanner: query failed for "
