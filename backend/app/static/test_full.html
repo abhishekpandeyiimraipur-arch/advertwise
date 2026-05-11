@@ -295,7 +295,10 @@
   }
 
   async function apiCall(method, path, body = null, isFormData = false) {
-    const headers = { 'Authorization': `Bearer ${GLOBAL_TOKEN}` };
+    const headers = { 
+      'Authorization': `Bearer ${GLOBAL_TOKEN}`,
+      'Idempotency-Key': path === '/api/generations' ? `upload-${Date.now()}` : `test-${Date.now()}`
+    };
     if (!isFormData) headers['Content-Type'] = 'application/json';
     
     const opts = { method, headers };
