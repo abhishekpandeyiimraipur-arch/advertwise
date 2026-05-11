@@ -64,8 +64,13 @@ async def phase2_chain(ctx: dict, gen_id: str) -> None:
         logger.info(f"phase2_chain: gen_id={gen_id} already complete.")
         return
 
+    import json as _json
     product_brief = checkpoint["product_brief"]
+    if isinstance(product_brief, str):
+        product_brief = _json.loads(product_brief)
     campaign_brief = checkpoint["campaign_brief"]
+    if isinstance(campaign_brief, str) and campaign_brief:
+        campaign_brief = _json.loads(campaign_brief)
 
     # STAGE 1 — Framework Router
     if not skip_router:
