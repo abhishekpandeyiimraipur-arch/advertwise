@@ -321,6 +321,24 @@
     </div>
   </div>
 
+
+  <!-- UPLOAD CARD -->
+  <div class="card">
+    <div class="section-title">Upload Product Image</div>
+    <div class="config-row" style="align-items:flex-end;gap:12px;">
+      <div class="field" style="flex:1">
+        <label>Product Image</label>
+        <input type="file" id="productImage" accept="image/*" 
+          style="background:#2a2a2a;border:1px solid #444;color:#f0f0f0;
+          padding:8px 12px;border-radius:4px;font-size:13px;width:100%;" />
+      </div>
+      <button class="btn" onclick="uploadImage()">Upload & Start Pipeline</button>
+    </div>
+    <div class="note" style="margin-top:8px;">
+      Uploads image → creates new generation → auto-fills Gen ID above
+    </div>
+  </div>
+
   <!-- STATUS CARD -->
   <div class="card" id="statusCard">
     <div class="section-title">Generation Status</div>
@@ -440,6 +458,38 @@
       renderStatusCard(data)
     } catch(err) {
       logResponse('GET', `/api/generations/${genId}`, 'ERR', { error: String(err) })
+    }
+  }
+
+async function uploadImage() {
+    const {token, base} = getConfig()
+    const fileInput = document.getElementById('productImage')
+    if (!fileInput.files[0]) { alert('Select an image first'); return }
+    
+    const formData = new FormData()
+    formData.append('source_image', fileInput.files[0])
+    
+    try {
+      const res = await fetch(`${base}/api/generations`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': `upload-${Date.now()}`
+        },
+        body: formData
+      })
+      const data = await res.json()
+      logResponse('POST', '/api/generations', res.status, data)
+      
+      if (data.gen_id) {
+        document.getElementById('genId').value = data.gen_id
+        logResponse('INFO', 'Gen ID auto-filled', 200, 
+          {message: 'Generation created! Watch SSE for progress.'})
+        connectSSE()
+        setTimeout(loadGeneration, 2000)
+      }
+    } catch(err) {
+      logResponse('POST', '/api/generations', 'ERR', {error: String(err)})
     }
   }
 
