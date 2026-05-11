@@ -96,6 +96,10 @@ async def dev_ui():
 async def dev_ui_phase4():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "test_phase4.html"))
 
+@app.get("/test")
+async def test_console():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "test_full.html"))
+
 @app.get("/dev-token")
 async def dev_token():
     import jwt, datetime, os

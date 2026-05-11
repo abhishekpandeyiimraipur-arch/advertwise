@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AdvertWise — Full Pipeline Console</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0a;
+      color: #e0e0e0;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 20px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .header {
+      border-bottom: 1px solid #333;
+      padding-bottom: 15px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { font-size: 18px; color: #6366f1; }
+    .status-bar { font-size: 12px; }
+    
+    .card {
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 12px;
+      color: #ccc;
+      display: flex;
+      justify-content: space-between;
+    }
+    
+    .btn {
+      background: #222;
+      color: #e0e0e0;
+      border: 1px solid #444;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    .btn:hover:not(:disabled) { background: #333; border-color: #6366f1; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #1e1e2f; border-color: #6366f1; color: #a5b4fc; }
+    .btn-primary:hover:not(:disabled) { background: #2d2d44; }
+    
+    .result-panel {
+      margin-top: 12px;
+      padding: 10px;
+      background: #000;
+      border: 1px dashed #333;
+      display: none;
+    }
+    .result-row { margin-bottom: 6px; }
+    .label { color: #888; display: inline-block; width: 150px; }
+    .val { color: #ccc; }
+    
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    .badge.pending { background: #333; color: #aaa; }
+    .badge.running { background: #1e3a5f; color: #60a5fa; }
+    .badge.pass { background: #064e3b; color: #34d399; }
+    .badge.fail { background: #7f1d1d; color: #fca5a5; }
+    
+    .color-green { color: #22c55e; }
+    .color-yellow { color: #f59e0b; }
+    .color-red { color: #ef4444; }
+    .color-blue { color: #3b82f6; }
+    
+    input[type=file], input[type=text] {
+      background: #000;
+      color: #fff;
+      border: 1px solid #444;
+      padding: 4px;
+      font-family: inherit;
+      font-size: 12px;
+      width: 100%;
+      margin-bottom: 8px;
+    }
+    
+    /* Logs */
+    .log-box {
+      height: 250px;
+      overflow-y: auto;
+      background: #000;
+      border: 1px solid #222;
+      padding: 10px;
+      font-size: 11px;
+      white-space: pre-wrap;
+      margin-top: 8px;
+    }
+    .log-entry { margin-bottom: 8px; border-bottom: 1px dashed #111; padding-bottom: 8px; }
+    .log-entry summary { cursor: pointer; color: #666; }
+    .log-entry summary:hover { color: #999; }
+    
+    .sse-event { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>AdvertWise /test-console</h1>
+    <div class="status-bar" id="autoTokenStatus">Token: FETCHING...</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="card" id="step1">
+    <div class="card-title">
+      <span>STEP 1 — UPLOAD & EXTRACT</span>
+      <span class="badge pending" id="badge1">PENDING</span>
+    </div>
+    <input type="file" id="imgUpload" accept="image/*" />
+    <button class="btn btn-primary" id="btn1" onclick="runStep1()">Upload & Extract</button>
+    
+    <div class="result-panel" id="res1">
+      <div class="result-row"><span class="label">Gen ID:</span><span class="val" id="val1-genid" style="cursor:pointer;color:#6366f1;" onclick="copyText(this.innerText)"></span></div>
+      <div class="result-row"><span class="label">Product Name:</span><span class="val" id="val1-name"></span></div>
+      <div class="result-row"><span class="label">Category:</span><span class="val" id="val1-cat"></span></div>
+      <div class="result-row"><span class="label">Confidence:</span><span class="val" id="val1-conf"></span></div>
+      <div class="result-row"><span class="label">Status:</span><span class="val" id="val1-status"></span></div>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="card" id="step2">
+    <div class="card-title">
+      <span>STEP 2 — PHASE 2 (Scripts)</span>
+      <span class="badge pending" id="badge2">PENDING</span>
+    </div>
+    <button class="btn btn-primary" id="btn2" onclick="runStep2()" disabled>Run Phase 2 →</button>
+    <div class="result-panel" id="res2">
+      <div class="result-row"><span class="label">Selected Script ID:</span><span class="val" id="val2-script"></span></div>
+      <div class="result-row"><span class="label">Framework:</span><span class="val" id="val2-frame"></span></div>
+      <div class="result-row"><span class="label">Critic Score:</span><span class="val" id="val2-score"></span></div>
+      <div class="result-row"><span class="label">Status:</span><span class="val" id="val2-status"></span></div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="card" id="step3">
+    <div class="card-title">
+      <span>STEP 3 — PHASE 3 (Strategy)</span>
+      <span class="badge pending" id="badge3">PENDING</span>
+    </div>
+    <button class="btn btn-primary" id="btn3" onclick="runStep3()" disabled>Run Phase 3 →</button>
+    <div class="result-panel" id="res3">
+      <div class="result-row"><span class="label">Motion:</span><span class="val" id="val3-motion"></span></div>
+      <div class="result-row"><span class="label">Environment:</span><span class="val" id="val3-env"></span></div>
+      <div class="result-row"><span class="label">B-Roll Plan:</span><span class="val" id="val3-broll"></span></div>
+      <div class="result-row"><span class="label">Hook:</span><span class="val" id="val3-hook"></span></div>
+      <div class="result-row"><span class="label">CTA:</span><span class="val" id="val3-cta"></span></div>
+      <div class="result-row"><span class="label">Status:</span><span class="val" id="val3-status"></span></div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="card" id="step4">
+    <div class="card-title">
+      <span>STEP 4 — RENDER (Phase 4)</span>
+      <span class="badge pending" id="badge4">PENDING</span>
+    </div>
+    <button class="btn btn-primary" id="btn4" onclick="runStep4()" disabled>Approve & Render</button>
+    <div class="result-panel" id="res4">
+      <div class="result-row"><span class="label">Template Key:</span><span class="val" id="val4-tpl"></span></div>
+      <div class="result-row"><span class="label">Preview:</span><br/>
+        <video id="val4-vid" width="250" controls style="display:none;margin-top:8px;border:1px solid #333;"></video>
+      </div>
+      <div class="result-row"><span class="label">Status:</span><span class="val" id="val4-status"></span></div>
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="card" id="step5">
+    <div class="card-title">
+      <span>STEP 5 — EXPORT</span>
+      <span class="badge pending" id="badge5">PENDING</span>
+    </div>
+    <div style="margin-bottom:10px;">
+      <div><input type="checkbox" id="chk-comm" /> Commercial Use</div>
+      <div><input type="checkbox" id="chk-rights" /> Image Rights</div>
+      <div><input type="checkbox" id="chk-ai" /> AI Generated per IT Rules 2026</div>
+    </div>
+    <button class="btn btn-primary" id="btn5" onclick="runStep5()" disabled>Sign & Export</button>
+    <div class="result-panel" id="res5">
+      <div class="result-row"><span class="label">Export URLs:</span><div id="val5-urls" style="margin-top:5px;"></div></div>
+      <div class="result-row"><span class="label">Status:</span><span class="val" id="val5-status"></span></div>
+    </div>
+  </div>
+
+  <!-- HARDENING PANEL -->
+  <div class="card">
+    <details>
+      <summary class="card-title" style="cursor:pointer; display:inline-block; margin-bottom:0;">HARDENING PANEL &amp; UTILS (Click to expand)</summary>
+      <div style="margin-top: 15px; display:flex; gap: 10px; align-items:center;">
+        <button class="btn" onclick="checkWallet()">Check Wallet</button>
+        <button class="btn" onclick="forceRetryExport()">Force Retry Export</button>
+        <div style="border-left:1px solid #333; padding-left:10px; display:flex; gap:5px;">
+          <input type="text" id="manualState" placeholder="e.g. preview_ready" style="width:140px;margin:0;" />
+          <button class="btn" onclick="resetGenState()">Reset Gen State</button>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- SSE PANEL -->
+  <div class="card">
+    <div class="card-title">
+      <span>LIVE SSE EVENTS</span>
+      <span class="badge pending" id="sseBadge">DISCONNECTED</span>
+    </div>
+    <div class="log-box" id="sseLog"></div>
+  </div>
+
+  <!-- API LOG -->
+  <div class="card">
+    <div class="card-title">
+      <span>API CALL LOG</span>
+      <button class="btn" onclick="document.getElementById('apiLog').innerHTML=''">Clear</button>
+    </div>
+    <div class="log-box" id="apiLog"></div>
+  </div>
+
+</div>
+
+<script>
+  let GLOBAL_TOKEN = "";
+  let GLOBAL_GEN_ID = "";
+  let sseSource = null;
+
+  // --- Auto Token ---
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const res = await fetch('/dev-token');
+      const data = await res.json();
+      GLOBAL_TOKEN = data.token;
+      document.getElementById('autoTokenStatus').innerText = "Token: OK";
+      document.getElementById('autoTokenStatus').className = "status-bar color-green";
+    } catch(e) {
+      document.getElementById('autoTokenStatus').innerText = "Token: FAILED";
+      document.getElementById('autoTokenStatus').className = "status-bar color-red";
+      logApi('GET', '/dev-token', 500, e.toString());
+    }
+  });
+
+  // --- Helpers ---
+  function logApi(method, path, status, body) {
+    const box = document.getElementById('apiLog');
+    const ts = new Date().toISOString().split('T')[1].slice(0,-1);
+    const color = (status >= 200 && status < 300) ? '#22c55e' : (status >= 400 ? '#ef4444' : '#f59e0b');
+    
+    let bodyStr = "";
+    if (typeof body === 'string') bodyStr = body;
+    else {
+      try { bodyStr = JSON.stringify(body, null, 2); } 
+      catch(e) { bodyStr = String(body); }
+    }
+
+    const html = `
+      <details class="log-entry">
+        <summary><span style="color:#888">[${ts}]</span> <strong style="color:#6366f1">${method}</strong> ${path} <span style="color:${color}">[${status}]</span></summary>
+        <pre style="color:#aaa;margin-top:5px;">${bodyStr}</pre>
+      </details>
+    `;
+    box.insertAdjacentHTML('afterbegin', html);
+  }
+
+  function setBadge(id, state, text) {
+    const el = document.getElementById(id);
+    el.className = `badge ${state}`;
+    el.innerText = text;
+  }
+
+  function copyText(txt) {
+    navigator.clipboard.writeText(txt);
+  }
+
+  async function apiCall(method, path, body = null, isFormData = false) {
+    const headers = { 'Authorization': `Bearer ${GLOBAL_TOKEN}` };
+    if (!isFormData) headers['Content-Type'] = 'application/json';
+    
+    const opts = { method, headers };
+    if (body) {
+      opts.body = isFormData ? body : JSON.stringify(body);
+    }
+    
+    try {
+      const res = await fetch(path, opts);
+      let data = {};
+      try { data = await res.json(); } catch(e){}
+      logApi(method, path, res.status, data);
+      return { status: res.status, data };
+    } catch(err) {
+      logApi(method, path, 0, err.toString());
+      return { status: 0, data: null };
+    }
+  }
+
+  async function pollStatus(targetStatus, callback, stepBadgeId, currentStatusCheck = null) {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      const { status, data } = await apiCall('GET', `/api/generations/${GLOBAL_GEN_ID}`);
+      
+      if (status === 200 && data) {
+        if (currentStatusCheck) currentStatusCheck(data.status);
+        
+        if (data.status === targetStatus) {
+          clearInterval(interval);
+          callback(data);
+        } else if (data.status.includes('failed')) {
+          clearInterval(interval);
+          setBadge(stepBadgeId, 'fail', 'FAILED');
+        }
+      }
+      if (attempts > 100) { clearInterval(interval); setBadge(stepBadgeId, 'fail', 'TIMEOUT'); }
+    }, 3000);
+  }
+
+  function connectSSE() {
+    if (sseSource) sseSource.close();
+    if (!GLOBAL_GEN_ID) return;
+    
+    sseSource = new EventSource(`/api/sse/${GLOBAL_GEN_ID}`);
+    const box = document.getElementById('sseLog');
+    
+    sseSource.onopen = () => setBadge('sseBadge', 'pass', 'CONNECTED');
+    sseSource.onerror = () => setBadge('sseBadge', 'fail', 'ERROR');
+    
+    sseSource.onmessage = (e) => {
+      const ts = new Date().toISOString().split('T')[1].slice(0,-1);
+      let color = '#ccc';
+      if (e.data.includes('state_change')) color = '#3b82f6';
+      else if (e.data.includes('error')) color = '#ef4444';
+      else if (e.data.includes('progress') || e.data.includes('complete')) color = '#22c55e';
+      
+      const div = document.createElement('div');
+      div.className = 'sse-event';
+      div.style.color = color;
+      div.innerText = `[${ts}] ${e.data}`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    };
+  }
+
+  // --- STEPS ---
+
+  async function runStep1() {
+    const file = document.getElementById('imgUpload').files[0];
+    if (!file) return alert('Select image!');
+    
+    setBadge('badge1', 'running', 'UPLOADING');
+    document.getElementById('btn1').disabled = true;
+    
+    const fd = new FormData();
+    fd.append('source_image', file);
+    const { status, data } = await apiCall('POST', '/api/generations', fd, true);
+    
+    if (status >= 200 && status < 300 && data && data.gen_id) {
+      GLOBAL_GEN_ID = data.gen_id;
+      document.getElementById('val1-genid').innerText = GLOBAL_GEN_ID;
+      document.getElementById('res1').style.display = 'block';
+      connectSSE();
+      
+      setBadge('badge1', 'running', 'POLLING');
+      pollStatus('brief_ready', (fullData) => {
+        setBadge('badge1', 'pass', 'PASS');
+        document.getElementById('btn2').disabled = false;
+        
+        const pb = fullData.product_brief || {};
+        document.getElementById('val1-name').innerText = pb.product_name || '-';
+        
+        const cat = pb.category || '-';
+        const catEl = document.getElementById('val1-cat');
+        catEl.innerText = cat;
+        if (cat === 'd2c_fashion') catEl.className = 'val color-green';
+        
+        const conf = fullData.confidence_score;
+        const confEl = document.getElementById('val1-conf');
+        confEl.innerText = conf;
+        if (conf >= 0.85) confEl.className = 'val color-green';
+        else if (conf >= 0.70) confEl.className = 'val color-yellow';
+        else confEl.className = 'val color-red';
+        
+        document.getElementById('val1-status').innerText = fullData.status;
+      }, 'badge1');
+    } else {
+      setBadge('badge1', 'fail', 'FAIL');
+      document.getElementById('btn1').disabled = false;
+    }
+  }
+
+  async function runStep2() {
+    setBadge('badge2', 'running', 'RUNNING');
+    document.getElementById('btn2').disabled = true;
+    
+    const { status } = await apiCall('POST', `/api/generations/${GLOBAL_GEN_ID}/advance`);
+    if (status >= 200 && status < 300) {
+      document.getElementById('res2').style.display = 'block';
+      pollStatus('scripts_ready', (data) => {
+        setBadge('badge2', 'pass', 'PASS');
+        document.getElementById('btn3').disabled = false;
+        
+        document.getElementById('val2-script').innerText = data.selected_script_id || '-';
+        const scripts = data.scripts || [];
+        const sel = scripts.find(s => s.script_id === data.selected_script_id);
+        if (sel) {
+          document.getElementById('val2-frame').innerText = sel.framework || '-';
+          document.getElementById('val2-score').innerText = sel.critic_score || '-';
+        }
+        document.getElementById('val2-status').innerText = data.status;
+      }, 'badge2');
+    } else {
+      setBadge('badge2', 'fail', 'FAIL');
+      document.getElementById('btn2').disabled = false;
+    }
+  }
+
+  async function runStep3() {
+    setBadge('badge3', 'running', 'RUNNING');
+    document.getElementById('btn3').disabled = true;
+    
+    const { status } = await apiCall('POST', `/api/generations/${GLOBAL_GEN_ID}/advance`);
+    if (status >= 200 && status < 300) {
+      document.getElementById('res3').style.display = 'block';
+      pollStatus('strategy_preview', (data) => {
+        setBadge('badge3', 'pass', 'PASS');
+        document.getElementById('btn4').disabled = false;
+        
+        const sc = data.strategy_card || {};
+        document.getElementById('val3-motion').innerText = (sc.motion || {}).name || '-';
+        document.getElementById('val3-env').innerText = (sc.environment || {}).name || '-';
+        
+        const bp = data.b_roll_plan || {};
+        const clips = bp.clips || [];
+        const clipsStr = clips.map(c => `${c.clip_id}(${c.archetype})`).join(', ');
+        document.getElementById('val3-broll').innerText = clipsStr || '-';
+        
+        const ss = sc.script_summary || {};
+        document.getElementById('val3-hook').innerText = ss.hook || '-';
+        document.getElementById('val3-cta').innerText = ss.cta || '-';
+        
+        document.getElementById('val3-status').innerText = data.status;
+      }, 'badge3');
+    } else {
+      setBadge('badge3', 'fail', 'FAIL');
+      document.getElementById('btn3').disabled = false;
+    }
+  }
+
+  async function runStep4() {
+    setBadge('badge4', 'running', 'RUNNING');
+    document.getElementById('btn4').disabled = true;
+    
+    const { status } = await apiCall('POST', `/api/generations/${GLOBAL_GEN_ID}/approve-strategy`);
+    if (status >= 200 && status < 300) {
+      document.getElementById('res4').style.display = 'block';
+      pollStatus('preview_ready', (data) => {
+        setBadge('badge4', 'pass', 'PASS');
+        document.getElementById('btn5').disabled = false;
+        
+        if (data.preview_url) {
+          const vid = document.getElementById('val4-vid');
+          vid.src = data.preview_url;
+          vid.style.display = 'block';
+        }
+        document.getElementById('val4-status').innerText = data.status;
+        document.getElementById('val4-tpl').innerText = '-'; 
+      }, 'badge4');
+    } else {
+      setBadge('badge4', 'fail', 'FAIL');
+      document.getElementById('btn4').disabled = false;
+    }
+  }
+
+  async function runStep5() {
+    const chks = [
+      document.getElementById('chk-comm').checked,
+      document.getElementById('chk-rights').checked,
+      document.getElementById('chk-ai').checked
+    ];
+    if (!chks.every(Boolean)) return alert('Must check all 3 declaration checkboxes!');
+    
+    setBadge('badge5', 'running', 'RUNNING');
+    document.getElementById('btn5').disabled = true;
+    
+    const body = { commercial_use: true, image_rights: true, ai_disclosure: true };
+    const { status } = await apiCall('POST', `/api/generations/${GLOBAL_GEN_ID}/declaration`, body);
+    
+    if (status >= 200 && status < 300) {
+      document.getElementById('res5').style.display = 'block';
+      pollStatus('export_ready', (data) => {
+        setBadge('badge5', 'pass', 'PASS');
+        
+        const urlsDiv = document.getElementById('val5-urls');
+        urlsDiv.innerHTML = '';
+        if (data.export_assets && data.export_assets.length > 0) {
+          data.export_assets.forEach(url => {
+            urlsDiv.innerHTML += `<a href="${url}" target="_blank" style="color:#6366f1;display:block;margin-bottom:4px;">Download Asset</a>`;
+          });
+        } else {
+          urlsDiv.innerText = '-';
+        }
+        
+        document.getElementById('val5-status').innerText = data.status;
+      }, 'badge5');
+    } else {
+      setBadge('badge5', 'fail', 'FAIL');
+      document.getElementById('btn5').disabled = false;
+    }
+  }
+
+  // --- HARDENING ---
+  async function checkWallet() {
+    await apiCall('GET', '/api/wallet');
+  }
+
+  async function forceRetryExport() {
+    if (!GLOBAL_GEN_ID) return alert('No gen ID');
+    await apiCall('POST', `/api/generations/${GLOBAL_GEN_ID}/retry-export`, { resign: true });
+  }
+
+  async function resetGenState() {
+    if (!GLOBAL_GEN_ID) return alert('No gen ID');
+    const st = document.getElementById('manualState').value;
+    if (!st) return alert('Enter a state');
+    await apiCall('POST', `/api/generations/${GLOBAL_GEN_ID}/debug/reset-state`, { status: st });
+  }
+</script>
+</body>
+</html>
