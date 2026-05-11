@@ -85,13 +85,15 @@ async def phase4_coordinator(ctx: dict, gen_id: str) -> None:
     # ── Step 1: Read generation row ──────────────────────────────
     async with db_pool.acquire() as conn:
         gen = await conn.fetchrow(
-            """SELECT gen_id, isolated_png_url, refined_script,
-                      safe_scripts, selected_script_id,
-                      motion_archetype_id, environment_preset_id,
-                      tts_language, product_brief, plan_tier,
-                      b_roll_plan
-               FROM generations
-               WHERE gen_id = $1 AND status = 'funds_locked'""",
+            """SELECT g.gen_id, g.isolated_png_url, g.refined_script,
+                      g.safe_scripts, g.selected_script_id,
+                      g.motion_archetype_id, g.environment_preset_id,
+                      g.tts_language, g.product_brief, g.plan_tier,
+                      g.b_roll_plan, g.strategy_card,
+                      u.brand_profile
+               FROM generations g
+               JOIN users u ON u.user_id = g.user_id
+               WHERE g.gen_id = $1 AND g.status = 'funds_locked'""",
             gen_id,
         )
 
@@ -146,6 +148,8 @@ async def phase4_coordinator(ctx: dict, gen_id: str) -> None:
     b_roll_plan           = json.loads(gen["b_roll_plan"] or "[]")
     motion_archetype_id   = gen["motion_archetype_id"] or 2
     environment_preset_id = gen["environment_preset_id"] or 1
+    strategy_card         = json.loads(gen["strategy_card"] or "{}")
+    brand_profile         = json.loads(gen["brand_profile"] or "{}")
     isolated_png_url      = gen["isolated_png_url"]
 
     # Derive R2 key from public URL for WorkerReflect.
@@ -324,8 +328,9 @@ async def phase4_coordinator(ctx: dict, gen_id: str) -> None:
         gen_id=gen_id,
         i2v_r2_key=selected_i2v,
         tts_r2_key=tts_r2_key,
+        strategy_card=strategy_card,
         b_roll_plan=b_roll_plan,
-        benefit=benefit,
+        brand_profile=brand_profile,
         plan_tier=plan_tier,
     )
     logger.info(

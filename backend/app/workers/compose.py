@@ -10,6 +10,7 @@ All temp files written to /tmp/{gen_id}_*.
 Cleanup runs in finally block — always executes.
 """
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -33,13 +34,240 @@ BENEFIT_LUT_MAP: dict[str, str] = {
 }
 DEFAULT_LUT = "neutral_balanced.cube"
 
-SGI_WATERMARK_TEXT = "AI Generated Content"
-SGI_WATERMARK_FILTER = (
-    "drawtext=text='AI Generated Content | AdvertWise':"
-    "fontsize=16:fontcolor=white@0.8:"
-    "x=10:y=h-40:"
-    "box=1:boxcolor=black@0.3:boxborderw=4"
-)
+SGI_WATERMARK_TEXT = "AI Generated | Adcreo"
+
+# ── Pacing Templates ──────────────────────────────────────────
+# Each template defines the segment structure for a 15s ad.
+# source options: "broll" | "i2v" | "color_card"
+# overlay options: "hook_top" | "cta_bottom" | "cta_center" | "none"
+# transition options: "fade" | "cut" | "none"
+
+PACING_TEMPLATES: dict[str, dict] = {
+
+    "Drift": {
+        # Fashion, slow pan, aspirational, premium
+        # Mood: cinematic, let product breathe
+        "segments": [
+            {"type": "hook",    "source": "broll",      "duration_s": 3.0,
+             "overlay": "hook_top",    "transition": "fade"},
+            {"type": "product", "source": "i2v",        "duration_s": 10.0,
+             "overlay": "none",        "transition": "fade"},
+            {"type": "cta",     "source": "broll",      "duration_s": 2.0,
+             "overlay": "cta_bottom",  "transition": "none"},
+        ]
+    },
+
+    "Reveal": {
+        # Packaged food, home kitchen, warm, trustworthy
+        # Mood: clear, balanced, inviting
+        "segments": [
+            {"type": "hook",    "source": "broll",      "duration_s": 2.5,
+             "overlay": "hook_top",    "transition": "cut"},
+            {"type": "product", "source": "i2v",        "duration_s": 9.5,
+             "overlay": "none",        "transition": "cut"},
+            {"type": "cta",     "source": "broll",      "duration_s": 3.0,
+             "overlay": "cta_bottom",  "transition": "none"},
+        ]
+    },
+
+    "Showcase": {
+        # Electronics, accessories, spec-heavy
+        # Mood: informative, credible, feature-forward
+        # 4 segments — adds context B-Roll between product and CTA
+        "segments": [
+            {"type": "hook",    "source": "broll",      "duration_s": 2.0,
+             "overlay": "hook_top",    "transition": "cut"},
+            {"type": "product", "source": "i2v",        "duration_s": 7.0,
+             "overlay": "none",        "transition": "cut"},
+            {"type": "context", "source": "broll",      "duration_s": 2.0,
+             "overlay": "none",        "transition": "cut"},
+            {"type": "cta",     "source": "broll",      "duration_s": 4.0,
+             "overlay": "cta_bottom",  "transition": "none"},
+        ]
+    },
+
+    "Festival": {
+        # festival_occasion_hook, Diwali, gifting, wedding season
+        # Mood: warm, celebratory, emotional
+        "segments": [
+            {"type": "hook",    "source": "broll",      "duration_s": 3.0,
+             "overlay": "hook_top",    "transition": "fade"},
+            {"type": "product", "source": "i2v",        "duration_s": 9.0,
+             "overlay": "none",        "transition": "fade"},
+            {"type": "cta",     "source": "broll",      "duration_s": 3.0,
+             "overlay": "cta_bottom",  "transition": "none"},
+        ]
+    },
+
+}
+
+# Maps strategy_card.motion.name → template key
+MOTION_TO_TEMPLATE: dict[str, str] = {
+    "Drift":          "Drift",
+    "Slow Pan":       "Drift",
+    "Ambient Float":  "Drift",
+    "Float":          "Drift",
+    "Product Reveal": "Reveal",
+    "Gentle Zoom":    "Reveal",
+    "Usage Ritual":   "Reveal",
+    "Spec Overlay":   "Showcase",
+    "Impact":         "Showcase",
+}
+
+# framework_angle overrides motion-based selection
+FRAMEWORK_OVERRIDE: dict[str, str] = {
+    "festival_occasion_hook": "Festival",
+    "spec_drop_flex":         "Showcase",
+    "hyper_local_comfort":    "Reveal",
+    "premium_upgrade":        "Drift",
+    "asmr_trigger":           "Drift",
+}
+
+# Overlay style → (y_position_expr, font_size, font_color_expr)
+# These are FFmpeg drawtext parameter values
+OVERLAY_STYLES: dict[str, tuple] = {
+    "hook_top":    ("140",    64, "white"),
+    "cta_bottom":  ("h-180",  56, "white"),
+    "cta_center":  ("(h-text_h)/2", 60, "white"),
+    "none":        (None, None, None),
+}
+
+def select_template(strategy_card: dict) -> tuple[str, dict]:
+    """
+    Selects pacing template from strategy_card.
+    framework_angle takes priority over motion.name.
+    Returns (template_key, template_dict).
+    Falls back to "Drift" if nothing matches.
+    """
+    framework_angle = (
+        strategy_card.get("script_summary", {})
+        .get("framework_angle", "")
+    )
+    motion_name = (
+        strategy_card.get("motion", {})
+        .get("name", "Drift")
+    )
+
+    if framework_angle in FRAMEWORK_OVERRIDE:
+        key = FRAMEWORK_OVERRIDE[framework_angle]
+    else:
+        key = MOTION_TO_TEMPLATE.get(motion_name, "Drift")
+
+    return key, PACING_TEMPLATES[key]
+
+
+def assign_assets_to_segments(
+    template: dict,
+    i2v_r2_key: str,
+    b_roll_plan: list[dict],
+    hook_text: str,
+    cta_text: str,
+    brand_name: str,
+    primary_color: str,
+) -> list[dict]:
+    """
+    Walks template segments and assigns real asset keys.
+    Consumes b_roll_plan clips in order across ALL broll slots.
+    Falls back to color_card when b_roll_plan is exhausted.
+    Returns list of fully-resolved segment dicts.
+    """
+    broll_queue = list(b_roll_plan)
+    resolved = []
+
+    for seg in template["segments"]:
+        s = dict(seg)  # copy — never mutate template
+
+        if s["source"] == "i2v":
+            s["r2_key"] = i2v_r2_key
+            s["clip_id"] = None
+
+        elif s["source"] == "broll":
+            if broll_queue:
+                clip = broll_queue.pop(0)
+                s["r2_key"]  = clip["r2_url"]
+                s["clip_id"] = clip["clip_id"]
+            else:
+                # Exhausted — graceful fallback to color card
+                s["source"]  = "color_card"
+                s["r2_key"]  = None
+                s["clip_id"] = None
+
+        elif s["source"] == "color_card":
+            s["r2_key"]  = None
+            s["clip_id"] = None
+
+        # Attach overlay text based on overlay style + segment type
+        overlay_style = s.get("overlay", "none")
+        if overlay_style == "hook_top":
+            s["overlay_text"] = hook_text
+            s["brand_text"]   = None
+        elif overlay_style in ("cta_bottom", "cta_center"):
+            s["overlay_text"] = cta_text
+            s["brand_text"]   = brand_name  # shown below CTA text
+        else:
+            s["overlay_text"] = None
+            s["brand_text"]   = None
+
+        s["primary_color"] = primary_color
+        resolved.append(s)
+
+    return resolved
+
+
+def build_timeline_ir(
+    gen_id: str,
+    i2v_r2_key: str,
+    tts_r2_key: str,
+    strategy_card: dict,
+    b_roll_plan: list[dict],
+    brand_profile: dict,
+) -> dict:
+    """
+    Converts strategy_card + b_roll_plan → frozen Timeline IR dict.
+    Selects pacing template from strategy_card signals.
+    Assigns assets to segments with graceful fallback.
+    Deterministic: same inputs = same IR every call.
+    """
+    # Text overlays from strategy
+    hook_raw = strategy_card.get("script_summary", {}).get("hook", "")
+    cta_raw  = strategy_card.get("script_summary", {}).get("cta", "")
+
+    hook_text = ((hook_raw[:1].upper() + hook_raw[1:])
+                 if hook_raw else "Watch This")[:40]
+    cta_text  = ((cta_raw[:1].upper() + cta_raw[1:])
+                 if cta_raw else "Order Now")[:40]
+
+    # Brand tokens
+    primary_color = brand_profile.get("primary_color", "#FFFFFF")
+    brand_name    = brand_profile.get("brand_name", "AdvertWise")
+
+    # Select template
+    template_key, template = select_template(strategy_card)
+
+    # Assign assets
+    segments = assign_assets_to_segments(
+        template=template,
+        i2v_r2_key=i2v_r2_key,
+        b_roll_plan=b_roll_plan,
+        hook_text=hook_text,
+        cta_text=cta_text,
+        brand_name=brand_name,
+        primary_color=primary_color,
+    )
+
+    return {
+        "gen_id": gen_id,
+        "duration_s": 15.0,
+        "aspect_ratio": "9:16",
+        "template_key": template_key,
+        "segments": segments,
+        "audio": {"r2_key": tts_r2_key},
+        "brand_tokens": {
+            "primary_color": primary_color,
+            "brand_name": brand_name,
+            "watermark_text": "AI Generated | Adcreo",
+        },
+    }
 
 
 class WorkerCompose:
@@ -89,78 +317,163 @@ class WorkerCompose:
 
     def _build_filter_graph(
         self,
-        hook_duration: float,
-        i2v_duration: float,
-        cta_duration: float,
+        ir: dict,
+        local_paths: dict,
         lut_path: str,
-    ) -> str:
+    ) -> tuple[str, list[str]]:
         """
-        Builds FFmpeg filter_complex for 15s vertical 1080x1920 composition.
-        All inputs scaled to 1080x1920 before concat.
-        Output: vertical 9:16 format.
+        Builds FFmpeg filter_complex from IR segments.
+        Handles 3-segment and 4-segment templates.
+        Returns (filter_graph_string, ffmpeg_inputs_list).
+
+        local_paths keys: segment index as string → local file path
+        e.g. {"0": "/tmp/gen_hook.mp4", "1": "/tmp/gen_i2v.mp4", ...}
+        Keys present only for broll and i2v segments (not color_card).
+        TTS is always the LAST input.
         """
-        # Target dimensions: 1080x1920 vertical (9:16)
         W, H = 1080, 1920
+        font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        brand    = ir["brand_tokens"]
+        segments = ir["segments"]
+        watermark = brand["watermark_text"].replace("'", "\u2019")
+        primary_hex = brand["primary_color"].lstrip("#")
 
-        # Scale + pad each segment to target size
-        # force_original_aspect_ratio=decrease then pad to fill
-        scale_hook = (
-            f"[0:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=decrease,"
-            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"tpad=stop_mode=clone:stop_duration={max(0.0, 3.0-hook_duration):.3f},"
-            f"trim=end=3.0,setsar=1[hook_v]"
+        parts        = []
+        ffmpeg_inputs = []
+        seg_labels   = []   # final scaled+overlay label per segment
+        input_idx    = 0    # tracks -i input file index
+
+        for i, seg in enumerate(segments):
+            source     = seg["source"]
+            duration_s = seg["duration_s"]
+            raw_label  = f"seg{i}_raw"
+            scaled_label = f"seg{i}_scaled"
+            final_label  = f"seg{i}_v"
+
+            # ── Build video source for this segment ──
+            if source in ("broll", "i2v"):
+                ffmpeg_inputs += ["-i", local_paths[str(i)]]
+                parts.append(
+                    f"[{input_idx}:v]fps=30,"
+                    f"scale={W}:{H}:"
+                    f"force_original_aspect_ratio=decrease,"
+                    f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
+                    f"tpad=stop_mode=clone:"
+                    f"stop_duration="
+                    f"{max(0.0, duration_s - 0.1):.3f},"
+                    f"trim=end={duration_s:.3f},"
+                    f"setsar=1[{scaled_label}]"
+                )
+                input_idx += 1
+            elif source == "color_card":
+                # lavfi color source — no input file needed
+                parts.append(
+                    f"color=c=#{primary_hex}:"
+                    f"s={W}x{H}:d={duration_s:.3f},"
+                    f"fps=30,setsar=1[{scaled_label}]"
+                )
+
+            # ── Add overlay if segment has overlay_text ──
+            overlay_text  = seg.get("overlay_text")
+            brand_text    = seg.get("brand_text")
+            overlay_style = seg.get("overlay", "none")
+
+            if overlay_text and overlay_style != "none":
+                style = OVERLAY_STYLES.get(overlay_style,
+                                           OVERLAY_STYLES["none"])
+                y_expr, font_size, font_color = style
+
+                if y_expr is not None:
+                    safe_text = overlay_text.replace("'", "\u2019")
+                    parts.append(
+                        f"[{scaled_label}]drawtext="
+                        f"text='{safe_text}':"
+                        f"fontfile={font}:"
+                        f"fontsize={font_size}:"
+                        f"fontcolor={font_color}:"
+                        f"x=(w-text_w)/2:y={y_expr}:"
+                        f"shadowcolor=black@0.8:"
+                        f"shadowx=2:shadowy=2[{raw_label}]"
+                    )
+
+                    # Brand name below CTA text
+                    if brand_text:
+                        safe_brand = brand_text.replace(
+                            "'", "\u2019")[:30]
+                        parts.append(
+                            f"[{raw_label}]drawtext="
+                            f"text='{safe_brand}':"
+                            f"fontfile={font}:"
+                            f"fontsize=28:fontcolor=white@0.9:"
+                            f"x=(w-text_w)/2:y=h-100:"
+                            f"shadowcolor=black@0.6:"
+                            f"shadowx=1:shadowy=1[{final_label}]"
+                        )
+                    else:
+                        # Rename raw_label to final_label
+                        parts[-1] = parts[-1].replace(
+                            f"[{raw_label}]", f"[{final_label}]"
+                        )
+                else:
+                    # overlay style is "none" — pass through
+                    parts.append(
+                        f"[{scaled_label}]null[{final_label}]"
+                    )
+            else:
+                # No overlay — pass through directly
+                parts.append(
+                    f"[{scaled_label}]null[{final_label}]"
+                )
+
+            seg_labels.append(f"[{final_label}]")
+
+        # ── TTS audio input (always last) ──
+        tts_input_idx = input_idx
+        ffmpeg_inputs += ["-i", local_paths["tts"]]
+
+        # ── Concat all segments ──
+        n = len(segments)
+        concat_inputs = "".join(seg_labels)
+        parts.append(
+            f"{concat_inputs}concat=n={n}:v=1:a=0[concat_v]"
         )
-        scale_i2v = (
-            f"[1:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=decrease,"
-            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"tpad=stop_mode=clone:stop_duration={max(0.0, 9.0-i2v_duration):.3f},"
-            f"trim=end=9.0,setsar=1[i2v_v]"
+
+        # ── LUT color grade ──
+        parts.append(f"[concat_v]lut3d={lut_path}[graded_v]")
+
+        # ── SGI watermark — always present, bottom-left ──
+        safe_watermark = watermark.replace("'", "\u2019")
+        parts.append(
+            f"[graded_v]drawtext="
+            f"text='{safe_watermark}':"
+            f"fontsize=18:fontcolor=white@0.6:"
+            f"x=16:y=h-36[final_v]"
         )
-        scale_cta = (
-            f"[2:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=decrease,"
-            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"tpad=stop_mode=clone:stop_duration={max(0.0, 3.0-cta_duration):.3f},"
-            f"trim=end=3.0,setsar=1[cta_v]"
+
+        # ── Audio pad/trim ──
+        parts.append(
+            f"[{tts_input_idx}:a]"
+            f"atrim=end=15.0,apad=whole_dur=15.0[padded_a]"
         )
-        concat     = "[hook_v][i2v_v][cta_v]concat=n=3:v=1:a=0[concat_v]"
-        lut        = f"[concat_v]lut3d={lut_path}[graded_v]"
-        watermark  = f"[graded_v]{SGI_WATERMARK_FILTER}[watermarked_v]"
-        audio      = "[3:a]atrim=end=15.0,apad=whole_dur=15.0[padded_a]"
 
-        parts = [scale_hook, scale_i2v, scale_cta, concat, lut, watermark, audio]
-        sep = ";" + chr(10)
-        return sep.join(parts)
-
-
+        return ";\n".join(parts), ffmpeg_inputs
 
     def _build_ffmpeg_cmd(
         self,
-        hook_path: str,
-        i2v_path: str,
-        cta_path: str,
-        tts_path: str,
+        inputs: list[str],
         output_path: str,
         filter_graph: str,
     ) -> list[str]:
-        """
-        Builds complete FFmpeg command list for subprocess execution.
-        The shortest-stream flag is explicitly excluded.
-        Always includes -t 15 (explicit duration cap).
-        Returns list of strings for asyncio.create_subprocess_exec.
-        """
         return [
             "ffmpeg", "-y",
-            "-i", hook_path,
-            "-i", i2v_path,
-            "-i", cta_path,
-            "-i", tts_path,
+            *inputs,
             "-filter_complex", filter_graph,
-            "-map", "[watermarked_v]",
+            "-map", "[final_v]",
             "-map", "[padded_a]",
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
             "-r", "30",
-                "-t", "15",
+            "-t", "15",
             output_path,
         ]
 
@@ -197,8 +510,9 @@ class WorkerCompose:
         gen_id: str,
         i2v_r2_key: str,
         tts_r2_key: str,
+        strategy_card: dict,
         b_roll_plan: list[dict],
-        benefit: str,
+        brand_profile: dict,
         plan_tier: str,
     ) -> str:
         """
@@ -206,6 +520,8 @@ class WorkerCompose:
         Applies LUT color grade + SGI watermark.
         Uploads result to R2. Returns R2 key string.
 
+        strategy_card  — Phase 3 strategy output (contains benefit, etc.)
+        brand_profile  — User brand identity tokens from users table.
         b_roll_plan[0] = hook clip dict (r2_url = R2 object key)
         b_roll_plan[1] = cta clip dict  (r2_url = R2 object key)
 
@@ -213,116 +529,132 @@ class WorkerCompose:
         Raises ComposeDurationError if segment durations out of bounds.
         Temp files always cleaned up in finally block.
         """
-        # ── Temp file paths ──────────────────────────────────────
-        hook_path   = self._get_temp_path(gen_id, "hook.mp4")
-        i2v_path    = self._get_temp_path(gen_id, "i2v.mp4")
-        cta_path    = self._get_temp_path(gen_id, "cta.mp4")
-        tts_path    = self._get_temp_path(gen_id, "tts.mp3")
+        # ── Step 0: Build Timeline IR ──────────────────────────
+        ir = build_timeline_ir(
+            gen_id, i2v_r2_key, tts_r2_key,
+            strategy_card, b_roll_plan, brand_profile
+        )
+        logger.info(
+            f"[compose] IR gen={gen_id} "
+            f"template={ir['template_key']} "
+            f"segments={len(ir['segments'])}: "
+            f"{json.dumps(ir)}"
+        )
+
+        brand = ir["brand_tokens"]
+        segments = ir["segments"]
+
+        # ── Temp paths ─────────────────────────────────────────
         output_path = self._get_temp_path(gen_id, "preview.mp4")
-        temp_files  = [hook_path, i2v_path, cta_path,
-                       tts_path, output_path]
+        tts_path    = self._get_temp_path(gen_id, "tts.mp3")
+        temp_files  = [output_path, tts_path]
+
+        # local_paths: segment index → local file path
+        # "tts" → tts local path
+        local_paths: dict[str, str] = {"tts": tts_path}
+
+        for i, seg in enumerate(segments):
+            if seg["source"] in ("broll", "i2v"):
+                ext = "mp4"
+                p   = self._get_temp_path(gen_id, f"seg{i}.{ext}")
+                local_paths[str(i)] = p
+                temp_files.append(p)
 
         try:
-            # ── Step 1: Validate b_roll_plan ─────────────────────
-            if not b_roll_plan or len(b_roll_plan) < 2:
-                raise ComposeError(
-                    f"b_roll_plan requires 2 clips for gen={gen_id}. "
-                    f"Got {len(b_roll_plan) if b_roll_plan else 0}."
-                )
-
-            hook_clip = b_roll_plan[0]
-            cta_clip  = b_roll_plan[1]
-
-            # ── Step 2: Download all 4 assets from R2 ────────────
+            # ── Step 1: Download assets concurrently ───────────
             bucket = os.environ["R2_BUCKET_NAME"]
 
             async def download_and_write(
                 r2_key: str, local_path: str
-            ):
+            ) -> None:
                 resp = await asyncio.to_thread(
                     self.r2_client.get_object,
-                    Bucket=bucket,
-                    Key=r2_key,
+                    Bucket=bucket, Key=r2_key,
                 )
                 data = resp["Body"].read()
                 await asyncio.to_thread(
                     Path(local_path).write_bytes, data
                 )
 
-            # All 4 downloads concurrently — saves 3-4 seconds
-            await asyncio.gather(
-                download_and_write(hook_clip["r2_url"], hook_path),
-                download_and_write(i2v_r2_key,          i2v_path),
-                download_and_write(cta_clip["r2_url"],  cta_path),
-                download_and_write(tts_r2_key,           tts_path),
-            )
-            logger.info(f"Compose assets downloaded gen={gen_id}")
-
-            # ── Step 3: Probe durations ───────────────────────────
-            hook_dur, i2v_dur, cta_dur = await asyncio.gather(
-                self._probe_duration(hook_path),
-                self._probe_duration(i2v_path),
-                self._probe_duration(cta_path),
-            )
-
-            for name, dur in [("hook", hook_dur),
-                               ("i2v",  i2v_dur),
-                               ("cta",  cta_dur)]:
-                if dur > MAX_SEGMENT_DURATION_S:
-                    raise ComposeDurationError(
-                        f"Segment {name} duration {dur:.1f}s "
-                        f"exceeds max {MAX_SEGMENT_DURATION_S}s "
-                        f"gen={gen_id}"
+            downloads = [
+                download_and_write(
+                    ir["audio"]["r2_key"], tts_path
+                )
+            ]
+            for i, seg in enumerate(segments):
+                if seg["source"] in ("broll", "i2v"):
+                    downloads.append(
+                        download_and_write(
+                            seg["r2_key"], local_paths[str(i)]
+                        )
                     )
 
+            await asyncio.gather(*downloads)
             logger.info(
-                f"Compose durations gen={gen_id} "
-                f"hook={hook_dur:.2f}s i2v={i2v_dur:.2f}s "
-                f"cta={cta_dur:.2f}s"
+                f"[compose] Downloads done gen={gen_id} "
+                f"count={len(downloads)}"
             )
 
-            # ── Step 4: Build filter graph ────────────────────────
-            lut_path = self._select_lut(benefit)
-            lut_str  = str(lut_path).replace(os.sep, "/")
+            # ── Step 2: Probe I2V duration only ────────────────
+            i2v_seg_idx = next(
+                i for i, s in enumerate(segments)
+                if s["source"] == "i2v"
+            )
+            i2v_dur = await self._probe_duration(
+                local_paths[str(i2v_seg_idx)]
+            )
+            if i2v_dur > MAX_SEGMENT_DURATION_S:
+                raise ComposeDurationError(
+                    f"I2V duration {i2v_dur:.1f}s exceeds "
+                    f"max {MAX_SEGMENT_DURATION_S}s gen={gen_id}"
+                )
 
-            filter_graph = self._build_filter_graph(
-                hook_dur, i2v_dur, cta_dur, lut_str
+            # Patch i2v segment duration with actual probed value
+            # (template says 9 or 10, actual clip may differ)
+            segments[i2v_seg_idx]["duration_s"] = min(
+                i2v_dur, segments[i2v_seg_idx]["duration_s"]
             )
 
-            # ── Step 5: Run FFmpeg ────────────────────────────────
+            # ── Step 3: Build filter graph ──────────────────────
+            benefit  = strategy_card.get("benefit", "natural")
+            lut_path_obj = self._select_lut(benefit)
+            lut_str  = str(lut_path_obj).replace(os.sep, "/")
+
+            filter_graph, ffmpeg_video_inputs = (
+                self._build_filter_graph(ir, local_paths, lut_str)
+            )
+
+            # ── Step 4: Build full FFmpeg command ───────────────
             cmd = self._build_ffmpeg_cmd(
-                hook_path, i2v_path, cta_path,
-                tts_path, output_path, filter_graph,
+                ffmpeg_video_inputs, output_path, filter_graph
             )
-
             logger.info(
-                f"Compose FFmpeg starting gen={gen_id} "
-                f"lut={lut_path.name} "
-                f"watermark='AI Generated Content | AdvertWise'"
+                f"[compose] FFmpeg start gen={gen_id} "
+                f"template={ir['template_key']} "
+                f"lut={lut_path_obj.name}"
             )
 
-            process = await asyncio.create_subprocess_exec(
+            # ── Step 5: Run FFmpeg ──────────────────────────────
+            proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await process.communicate()
+            _, stderr = await proc.communicate()
 
-            if process.returncode != 0:
+            if proc.returncode != 0:
                 raise ComposeError(
                     f"FFmpeg failed gen={gen_id} "
-                    f"rc={process.returncode}: "
-                    f"{stderr.decode()[:500]}"
+                    f"rc={proc.returncode}: "
+                    f"{stderr.decode()[:800]}"
                 )
+            logger.info(f"[compose] FFmpeg done gen={gen_id}")
 
-            logger.info(f"Compose FFmpeg done gen={gen_id}")
-
-            # ── Step 6: Upload preview to R2 ─────────────────────
+            # ── Step 6: Upload to R2 ────────────────────────────
             r2_key        = f"{gen_id}/compose/preview_15s.mp4"
             preview_bytes = await asyncio.to_thread(
                 Path(output_path).read_bytes
             )
-
             await asyncio.to_thread(
                 self.r2_client.put_object,
                 Bucket=bucket,
@@ -330,20 +662,16 @@ class WorkerCompose:
                 Body=preview_bytes,
                 ContentType="video/mp4",
             )
-
             logger.info(
-                f"Compose uploaded gen={gen_id} key={r2_key}"
+                f"[compose] Uploaded gen={gen_id} key={r2_key}"
             )
             return r2_key
 
         except (ComposeError, ComposeDurationError):
             raise
-
         except Exception as e:
             raise ComposeError(
                 f"Compose unexpected error gen={gen_id}: {e}"
             ) from e
-
         finally:
             self._cleanup_temp_files(temp_files)
-
