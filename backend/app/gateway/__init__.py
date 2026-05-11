@@ -23,7 +23,7 @@ VISION_PROMPT = """You are a product analyst for Indian D2C brands.
 Analyze this product image and return a JSON object with exactly these fields:
 {
   "product_name": "string — specific product name",
-  "category": "one of: d2c_beauty, packaged_food, hard_accessories, electronics, home_kitchen",
+  "category": "one of: d2c_beauty | packaged_food | hard_accessories | electronics | home_kitchen | d2c_fashion. Use d2c_fashion for clothing, kurta, saree, lehenga, ethnic wear, western wear, fashion, apparel, footwear, bags",
   "price_inr": null or number — estimated Indian retail price,
   "key_features": ["list", "of", "3-5", "key", "features"],
   "color_palette": ["#hex1", "#hex2", "#hex3"],

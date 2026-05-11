@@ -404,8 +404,8 @@ class WorkerCompose:
                             f"[{raw_label}]drawtext="
                             f"text='{safe_brand}':"
                             f"fontfile={font}:"
-                            f"fontsize=28:fontcolor=white@0.9:"
-                            f"x=(w-text_w)/2:y=h-100:"
+                            f"fontsize=30:fontcolor=white:"
+                            f"x=(w-text_w)/2:y=h-120:"
                             f"shadowcolor=black@0.6:"
                             f"shadowx=1:shadowy=1[{final_label}]"
                         )
@@ -446,8 +446,8 @@ class WorkerCompose:
         parts.append(
             f"[graded_v]drawtext="
             f"text='{safe_watermark}':"
-            f"fontsize=18:fontcolor=white@0.6:"
-            f"x=16:y=h-36[final_v]"
+            f"fontsize=22:fontcolor=white@0.85:"
+            f"x=20:y=h-44[final_v]"
         )
 
         # ── Audio pad/trim ──

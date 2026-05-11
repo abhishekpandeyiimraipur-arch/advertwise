@@ -19,7 +19,7 @@ FIRECRAWL_TIMEOUT_SECONDS = 15
 
 GREEN_ZONE_SET = frozenset({
     "d2c_beauty", "packaged_food", "hard_accessories",
-    "electronics", "home_kitchen"
+    "electronics", "home_kitchen", "d2c_fashion"
 })
 
 MOTION_MAP = {
