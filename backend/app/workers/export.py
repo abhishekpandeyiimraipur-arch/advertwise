@@ -212,7 +212,7 @@ class WorkerExport:
         # ── Verify (best-effort — non-fatal) ─────────────────────
         try:
             vproc = await asyncio.create_subprocess_exec(
-                "c2patool", "--verify", output_path,
+                "c2patool", output_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
