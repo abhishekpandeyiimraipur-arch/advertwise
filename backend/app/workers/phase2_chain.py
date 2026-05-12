@@ -77,7 +77,7 @@ async def phase2_chain(ctx: dict, gen_id: str) -> None:
         try:
             selected, rationale, fallback_triggered = await WorkerCopy(gateway, prompt_catalog, gen_id).framework_router(product_brief, campaign_brief)
         except ProviderUnavailableError:
-            await _mark_failed(db_pool, gen_id, "failed_generation", "ECM-013", redis_db0)
+            await _mark_failed(db_pool, gen_id, "failed_render", "ECM-013", redis_db0)
             return
         except ValueError:
             selected = list(SAFE_TRIO)
@@ -112,7 +112,7 @@ async def phase2_chain(ctx: dict, gen_id: str) -> None:
         try:
             scripts = await WorkerCopy(gateway, prompt_catalog, gen_id).generate_per_framework(product_brief, campaign_brief, selected)
         except ProviderUnavailableError:
-            await _mark_failed(db_pool, gen_id, "failed_generation", "ECM-013", redis_db0)
+            await _mark_failed(db_pool, gen_id, "failed_render", "ECM-013", redis_db0)
             return
         
         raw_scripts_json = json.dumps([asdict(s) for s in scripts])
@@ -194,7 +194,7 @@ async def phase2_chain(ctx: dict, gen_id: str) -> None:
                    status='scripts_ready',
                    updated_at=NOW()
                WHERE gen_id=$1 AND status='safety_checking'""",
-            uuid.UUID(gen_id), safe_scripts_json, safety_flags_json, safety_result["scripts_available"]
+            uuid.UUID(gen_id), safe_scripts_json, safety_flags_json, bool(safety_result["scripts_available"])
         )
         
     if updated == "UPDATE 0":
@@ -204,6 +204,6 @@ async def phase2_chain(ctx: dict, gen_id: str) -> None:
     await _push_sse(redis_db0, gen_id, {
         "type": "state_change",
         "state": "scripts_ready",
-        "scripts_available": safety_result["scripts_available"],
+        "scripts_available": bool(safety_result["scripts_available"]),
         "rejected_frameworks": safety_result["rejected_frameworks"]
     })

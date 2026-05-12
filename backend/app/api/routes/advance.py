@@ -12,6 +12,8 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user
+from arq import create_pool
+from arq.connections import RedisSettings
 from app.workers.strategist import WorkerStrategist
 
 logger = logging.getLogger(__name__)
@@ -228,7 +230,6 @@ async def advance_generation(
                 if row["product_brief"]:
                     brief = row["product_brief"]
                     if isinstance(brief, str):
-                        import json
                         brief = json.loads(brief)
                     category = brief.get("category")
 
@@ -248,7 +249,6 @@ async def advance_generation(
                     director_tips = [dict(t) for t in tips]
             except Exception as e:
                 # Silent degradation — tips table may not exist yet
-                import logging
                 logging.getLogger(__name__).warning(f"director_tips fetch failed: {e}")
                 director_tips = []
 
@@ -272,9 +272,6 @@ async def advance_generation(
             # phase2_chain not yet implemented — enqueue by name string.
             # ARQ will hold it in queue until the function is registered.
             try:
-                import os
-                from arq import create_pool
-                from arq.connections import RedisSettings
                 arq_redis = await create_pool(
                     RedisSettings.from_dsn(
                         os.environ.get("REDIS_URL", "redis://localhost:6379/1")
@@ -289,13 +286,11 @@ async def advance_generation(
             except Exception as e:
                 # Log but do not fail the request — state is already scripting
                 # Phase 2 can be manually re-triggered if needed
-                import logging
                 logging.getLogger(__name__).error(
                     f"advance: ARQ enqueue failed for gen_id={gen_id}: {e}"
                 )
 
             # ── STEP 6: SSE push ──────────────────────────────────────────
-            import json
             sse_key = f"sse:{gen_id}"
             await redis_db0.lpush(
                 sse_key,
@@ -336,7 +331,7 @@ async def advance_generation(
             # STEP 2: State-guarded UPDATE
             result = await db_pool.execute(
                 """UPDATE generations
-                   SET status = 'strategy_pending', updated_at = NOW()
+                   SET status = 'strategy_preview', updated_at = NOW()
                    WHERE gen_id = $1 AND status = 'scripts_ready'""",
                 uuid.UUID(gen_id)
             )
@@ -344,11 +339,10 @@ async def advance_generation(
                 raise HTTPException(409, detail={"error_code": "ECM-012"})
 
             # STEP 3: Call Worker-STRATEGIST in-process
-            strategist = WorkerStrategist()
+            strategist = WorkerStrategist(db_pool)
             try:
-                strategy_card = await strategist.run(
+                strategy_card = await strategist.process(
                     gen_id=gen_id,
-                    db=db_pool,
                 )
             except Exception as e:
                 # Rollback state so user can retry
@@ -358,22 +352,10 @@ async def advance_generation(
                        WHERE gen_id = $1""",
                     uuid.UUID(gen_id)
                 )
-                logger.error("strategist_failed", extra={"gen_id": gen_id, "error": str(e)})
+                logger.error("strategist_failed", extra={"gen_id": gen_id, "error": str(e)}, exc_info=True)
                 raise HTTPException(503, detail={"error_code": "ECM-013"})
 
-            # STEP 4: Final state UPDATE → strategy_preview
-            try:
-                await db_pool.execute(
-                    """UPDATE generations
-                       SET status = 'strategy_preview',
-                           strategy_card = $2::jsonb,
-                           updated_at = NOW()
-                       WHERE gen_id = $1""",
-                    uuid.UUID(gen_id),
-                    json.dumps(strategy_card),
-                )
-            except Exception as e:
-                logger.error("strategy_card update failed", extra={"gen_id": gen_id, "error": str(e)})
+            # STEP 4: Strategist already updated DB — skip redundant write
 
             # STEP 5: SSE push
             await redis_db0.lpush(

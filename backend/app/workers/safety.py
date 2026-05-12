@@ -156,6 +156,6 @@ class WorkerSafety:
                 }
                 for f in processed_flags
             ],
-            "scripts_available": len(safe_scripts),
+            "scripts_available": len(safe_scripts) > 0,
             "rejected_frameworks": rejected_frameworks,
         }

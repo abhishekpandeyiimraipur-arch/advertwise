@@ -1,4 +1,5 @@
 import json
+import uuid
 import logging
 from dataclasses import asdict
 
@@ -64,8 +65,8 @@ class WorkerStrategist:
                           cogs_total, product_brief, confidence_score,
                           routed_frameworks, routing_rationale
                    FROM generations
-                   WHERE gen_id = $1 AND status = 'scripts_ready'""",
-                gen_id
+                   WHERE gen_id = $1 AND status IN ('scripts_ready'::job_status, 'strategy_preview'::job_status)""",
+                uuid.UUID(gen_id)
             )
         if gen is None:
             raise ValueError(
@@ -78,6 +79,8 @@ class WorkerStrategist:
         selected_script = Script(**safe_scripts_list[idx])
 
         product_brief = gen["product_brief"]
+        if isinstance(product_brief, str):
+            product_brief = json.loads(product_brief)
         category = product_brief.get("category", "packaged_food")
         motion_id = gen["motion_archetype_id"]
         env_id = gen["environment_preset_id"]
@@ -164,8 +167,8 @@ class WorkerStrategist:
                        status = 'strategy_preview',
                        updated_at = NOW()
                    WHERE gen_id = $1
-                     AND status = 'scripts_ready'""",
-                gen_id,
+                     AND status IN ('scripts_ready'::job_status, 'strategy_preview'::job_status)""",
+                uuid.UUID(gen_id),
                 strategy_card_json,
                 b_roll_json,
             )

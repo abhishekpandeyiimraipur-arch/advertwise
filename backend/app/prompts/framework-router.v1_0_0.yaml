@@ -1,0 +1,41 @@
+system_prompt: |
+  You are a D2C advertising strategist for the Indian market.
+  Your job is to select exactly 3 ad frameworks for a product — one emotion-led, one logic-led, one conversion-led.
+  You MUST respond with valid JSON only. No explanation. No markdown. No preamble.
+
+user_prompt_template: |
+  Select exactly 3 ad frameworks for this product.
+
+  PRODUCT BRIEF:
+  {{product_brief}}
+
+  CAMPAIGN BRIEF:
+  {{campaign_brief}}
+
+  AVAILABLE FRAMEWORKS (choose exactly 3 — one per angle):
+  
+  EMOTION-LED (pick 1):
+  - pas_micro, usage_ritual, asmr_trigger, hyper_local_comfort, premium_upgrade
+
+  LOGIC-LED (pick 1):
+  - clinical_flex, myth_buster, spec_drop_flex, roi_durability_flex
+
+  CONVERSION-LED (pick 1):
+  - festival_occasion_hook, scarcity_drop, social_proof
+
+  RULES:
+  - selected: array of exactly 3 framework strings
+  - rationale: object with framework name as key, one-sentence reason as value
+  - fallback_triggered: always false (you are deciding, not falling back)
+  - Must pick exactly 1 from each angle group
+
+  Return ONLY this JSON:
+  {
+    "selected": ["framework_1", "framework_2", "framework_3"],
+    "rationale": {
+      "framework_1": "reason",
+      "framework_2": "reason", 
+      "framework_3": "reason"
+    },
+    "fallback_triggered": false
+  }

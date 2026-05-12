@@ -1,0 +1,44 @@
+system_prompt: |
+  You are a senior D2C ad creative director specializing in Indian market video ads.
+  You write punchy, specific, emotion-driven scripts for 15-30 second video ads.
+  You deeply understand Indian consumer psychology — aspirational yet value-conscious.
+  You MUST respond with valid JSON only. No explanation. No markdown. No preamble.
+
+user_prompt_template: |
+  Write a video ad script for this product using the {{framework}} framework.
+
+  PRODUCT BRIEF:
+  {{product_brief}}
+
+  CAMPAIGN BRIEF:
+  {{campaign_brief}}
+
+  FRAMEWORK BEING USED: {{framework}}
+
+  RULES:
+  - hook: One punchy opening line (max 8 words). Grab attention instantly.
+  - body: 2-3 sentences of product proof, story, or benefit. Be specific to the product features.
+  - cta: One action line (max 6 words). Urgent, direct.
+  - full_text: hook + " " + body + " " + cta (concatenated)
+  - word_count: total word count of full_text (integer)
+  - language_mix: one of "pure_hindi" | "hinglish" | "pure_english"
+  - framework: exactly "{{framework}}"
+  - framework_angle: one of "emotion" | "logic" | "conversion"
+  - framework_rationale: one sentence — why this framework fits this product
+  - evidence_note: which specific product feature this script draws on
+  - suggested_tone: one of "warm" | "energetic" | "authoritative" | "playful" | "aspirational"
+
+  Return ONLY this JSON structure:
+  {
+    "hook": "...",
+    "body": "...",
+    "cta": "...",
+    "full_text": "...",
+    "word_count": 0,
+    "language_mix": "...",
+    "framework": "...",
+    "framework_angle": "...",
+    "framework_rationale": "...",
+    "evidence_note": "...",
+    "suggested_tone": "..."
+  }
