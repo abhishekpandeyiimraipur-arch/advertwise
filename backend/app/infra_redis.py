@@ -52,3 +52,13 @@ class RedisManager:
         keys = [f"wallet:{user_id}", f"walletlock:{user_id}:{gen_id}"]
         args = [credits, ttl]
         return await self.db0.evalsha(self.wallet_lock_sha, len(keys), *keys, *args)
+
+    async def execute_wallet_refund(self, user_id: str, gen_id: str) -> int:
+        """
+        Atomically refund locked credits back to wallet.
+        Returns 1 = refunded, 0 = nothing to refund (already consumed or never locked).
+        """
+        if not self.wallet_refund_sha:
+            return 0
+        keys = [f"wallet:{user_id}", f"walletlock:{user_id}:{gen_id}"]
+        return await self.db0.evalsha(self.wallet_refund_sha, len(keys), *keys)

@@ -43,6 +43,58 @@ async def shutdown(ctx: dict) -> None:
         await ctx["redis_mgr"].disconnect()
 
 
+async def on_job_dead(ctx: dict, job_id: str, score: int) -> None:
+    import json, uuid, logging
+    logger = logging.getLogger(__name__)
+    db_pool   = ctx.get("db_pool")
+    redis_mgr = ctx.get("redis_mgr")
+    redis_db0 = ctx.get("redis_db0")
+    # job_id format: "phase4:{gen_id}" or "export:{gen_id}"
+    parts = job_id.split(":")
+    gen_id = parts[1] if len(parts) >= 2 else None
+    if not gen_id:
+        logger.error(f"on_job_dead: no gen_id in job_id={job_id}")
+        return
+    logger.warning(f"on_job_dead: gen_id={gen_id} job_id={job_id}")
+    try:
+        async with db_pool.acquire() as conn:
+            gen = await conn.fetchrow(
+                "SELECT user_id, status FROM generations WHERE gen_id = $1",
+                uuid.UUID(gen_id)
+            )
+        if not gen:
+            logger.error(f"on_job_dead: gen_id={gen_id} not found")
+            return
+        user_id = str(gen["user_id"])
+        refund_result = await redis_mgr.execute_wallet_refund(user_id, gen_id)
+        logger.info(f"on_job_dead: refund={refund_result} gen={gen_id}")
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE generations SET status='failed_render',
+                   error_code='ECM-013', updated_at=NOW()
+                   WHERE gen_id=$1 AND status NOT IN (
+                   'failed_render','failed_export','failed_safety',
+                   'failed_compliance','failed_category','export_ready')""",
+                uuid.UUID(gen_id)
+            )
+            await conn.execute(
+                """INSERT INTO audit_log (user_id, gen_id, action, payload)
+                   VALUES ($1, $2, 'dlq_failure', $3::jsonb)""",
+                uuid.UUID(user_id), uuid.UUID(gen_id),
+                json.dumps({"job_id": job_id,
+                            "refund_result": refund_result})
+            )
+        if redis_db0:
+            await redis_db0.lpush(f"sse:{gen_id}", json.dumps({
+                "type": "state_change", "state": "failed_render",
+                "error_code": "ECM-013"
+            }))
+            await redis_db0.expire(f"sse:{gen_id}", 300)
+        logger.info(f"on_job_dead: complete gen={gen_id}")
+    except Exception as e:
+        logger.error(f"on_job_dead FAILED gen={gen_id}: {e}", exc_info=True)
+
+
 class WorkerSettings:
     """
     Process B — Heavy render workers.
@@ -63,6 +115,7 @@ class WorkerSettings:
 
     on_startup = startup
     on_shutdown = shutdown
+    on_job_dead = on_job_dead
 
     max_jobs = 6          # hard cap per §8.8 — do not increase without PRD change
     job_timeout = 300     # coordinator max — export has its own 45s cap
