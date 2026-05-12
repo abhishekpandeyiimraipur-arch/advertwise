@@ -13,6 +13,7 @@ CI check_banned_patterns.py enforces the no-arq.enqueue constraint.
 """
 import asyncio
 import json
+import uuid
 import logging
 import os
 from decimal import Decimal
@@ -384,7 +385,7 @@ async def phase4_coordinator(ctx: dict, gen_id: str) -> None:
             f"preview_url={preview_public_url}"
         )
     except Exception as e:
-        import uuid, json
+
         logger.error(f"phase4_coordinator FAILED gen={gen_id}: {e}", exc_info=True)
         # DLQ: refund + failed_render + SSE
         try:
